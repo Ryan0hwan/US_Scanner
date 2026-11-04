@@ -465,7 +465,7 @@ def board_line(r: dict) -> str:
     p1w = f"{r['p1w']}" if r["p1w"] is not None else "-"
     p1m = f"{r['p1m']}" if r["p1m"] is not None else "-"
     return (fit(r["t"], 7) + fit(p1w, 6, True) + fit(p1m, 6, True) + f"{r['ex1w']:>+7.1f}{r['ex1m']:>+7.1f}"
-            f"{r['chg']:>+6.1f}{r['hi']:>7.1f} {hot}" + r["desc"])
+            f"{r['chg']:>+6.1f}{r['hi']:>7.1f} {hot}" + fit(r["desc"], 13).rstrip())
 
 
 def send_board(etf_res: list[dict], session):
