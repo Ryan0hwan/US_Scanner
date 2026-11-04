@@ -269,3 +269,33 @@ AU
 
 # ── 차트 예시로 추가 ──
 OII, Oceaneering International
+
+# ── 섹터별 종목 목록에서 추가 ──
+RCAT, Red Cat Holdings
+THC, Tenet Healthcare
+ANF, Abercrombie & Fitch
+CART, Maplebear (Instacart)
+DKNG, DraftKings
+FLUT, Flutter Entertainment
+CHDN, Churchill Downs
+TLRY, Tilray Brands
+CGC, Canopy Growth
+PAAS, Pan American Silver
+RGTI, Rigetti Computing
+ZION, Zions Bancorporation
+AFRM, Affirm
+STNE, StoneCo
+Z, Zillow
+OPEN, Opendoor
+AAL, American Airlines
+FLNC, Fluence Energy
+EOSE, Eos Energy
+NXT, Nextracker (Nextpower)
+ENPH, Enphase Energy
+RUN, Sunrun
+PLUG, Plug Power
+CCJ, Cameco
+OKLO, Oklo
+LEU, Centrus Energy
+BABA, Alibaba
+JD, JD.com
