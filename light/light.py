@@ -60,7 +60,18 @@ CREDIT_ALARM = float(os.environ.get("CREDIT_ALARM", "3"))       # 🔴 (신용 �
 CRISIS_TICKERS = ["^VIX", "^VIX3M", "CL=F", "^TNX", "DX-Y.NYB", "HYG", "IEF"]
 
 # 레버리지·인버스: 52주 고점 거리 점수 제외 / 채권·원자재: 분산일 점수 제외
-LEVERAGED = set(os.environ.get("LEVERAGED", "TQQQ,SQQQ,SOXL,SOXS,KORU").split(","))
+LEVERAGED = set(os.environ.get("LEVERAGED", "TQQQ,SQQQ,SOXL,SOXS,KORU,QLD,SPXU,TNA,TZA,GDXU,NRGU,LABU,TMF,TMV").split(","))
+# 레버리지·인버스는 수익률이 몇 배로 부풀려지므로 RS 순위·그룹 보드에서 제외
+# ── 그룹 RS 보드 (RSP 동일가중 기준, 1주 가중 RS + 1개월 RS) ──
+RS_BENCH = os.environ.get("RS_BENCH", "RSP")                       # 기준 지수 (동일가중 S&P500)
+W1_WEIGHTS = [1, 2, 3, 4, 5]                                       # 최근 5거래일 가중치 (오래된 날 → 최근 날)
+BOARD_INDEX = ["RSP", "SPY", "QQQ", "QQQE", "IWM", "DIA", "SPMO", "TLT"]
+BOARD_STYLE = ["IJS", "IJR", "IJH", "IJK", "IVE", "IVV", "IVW"]
+BOARD_SECTOR = ["XLRE", "XLF", "XLV", "XLY", "XLU", "XLB", "XLI", "XLP", "XLC", "XLE", "XLK"]
+BOARD_BROAD = set(os.environ.get("BOARD_BROAD", "VOO,VTI,XLG,TOPT,IWF,SCHD,VYM,JEPI,JEPQ,DGRO").split(","))  # 업종 그룹 표에서 뺄 지수형
+BOARD_TOP = int(os.environ.get("BOARD_TOP", "25"))                 # 업종 그룹: 1주 RS 상위 N개
+BOARD_BOTTOM = int(os.environ.get("BOARD_BOTTOM", "10"))           # 업종 그룹: 하위 N개
+HOT_W1, HOT_M1 = 80, 50                                            # 🔥 1주 RS 80 이상인데 1개월 RS 50 이하 = 막 강해지는 그룹
 NO_DIST = set(os.environ.get("NO_DIST", "TLT,IEF,LQD,HYG,GLD,DBC,USO").split(","))
 # 🚀 RS 급상승 / 📉 RS 급락: 1개월 RS 백분위와 3개월 RS 백분위의 차이
 RS1_DAYS = int(os.environ.get("RS1_DAYS", "21"))                  # 1개월 RS 기간
@@ -325,6 +336,7 @@ def crisis_eval(data) -> dict:
 # ───────────── ETF 판정 ─────────────
 def etf_eval(data, etfs, session) -> tuple[list[dict], list[str]]:
     res, missing = [], []
+    bench = data[RS_BENCH]["Close"] if RS_BENCH in data else (data["SPY"]["Close"] if "SPY" in data else None)
     for t, desc in etfs.items():
         df = data.get(t)
         if df is None or len(df) < 60 or df.index[-1].date() != session:
@@ -339,19 +351,36 @@ def etf_eval(data, etfs, session) -> tuple[list[dict], list[str]]:
         p5 = 0 if t in LEVERAGED else (1 if hi_dist >= -HIGH_NEAR else (-1 if hi_dist < -HIGH_FAR else 0))
         ret = (c.iloc[-1] / c.iloc[-RS_DAYS - 1] - 1) * 100 if len(c) > RS_DAYS else np.nan
         ret1 = (c.iloc[-1] / c.iloc[-RS1_DAYS - 1] - 1) * 100 if len(c) > RS1_DAYS else np.nan
+        ex1w = ex1m = np.nan
+        if bench is not None:
+            j = pd.concat([c, bench], axis=1, keys=["e", "b"]).dropna()
+            if len(j) > RS1_DAYS + 1:
+                d = j.pct_change().dropna()
+                ex = (d["e"] - d["b"]).tail(len(W1_WEIGHTS)).to_numpy() * 100
+                ex1w = float(np.dot(ex, W1_WEIGHTS) / sum(W1_WEIGHTS) * len(W1_WEIGHTS))  # 최근 날에 가중한 5일 초과수익(%)
+                ex1m = float(((j["e"].iloc[-1] / j["e"].iloc[-RS1_DAYS - 1]) - (j["b"].iloc[-1] / j["b"].iloc[-RS1_DAYS - 1])) * 100)
         res.append({"t": t, "desc": desc, "parts": [p1, p2, p3, 0, p5], "dist": nd,
-                    "hi": hi_dist, "ret": ret, "ret1": ret1, "chg": (c.iloc[-1] / c.iloc[-2] - 1) * 100})
-    ranked = sorted([r for r in res if not np.isnan(r["ret"])], key=lambda r: -r["ret"])
+                    "hi": hi_dist, "ret": ret, "ret1": ret1, "chg": (c.iloc[-1] / c.iloc[-2] - 1) * 100,
+                    "ex1w": ex1w, "ex1m": ex1m})
+    # RS 순위·백분위는 레버리지·인버스를 빼고 계산
+    ranked = sorted([r for r in res if not np.isnan(r["ret"]) and r["t"] not in LEVERAGED], key=lambda r: -r["ret"])
     n = len(ranked)
     for i, r in enumerate(ranked):
         r["rank"] = i + 1
         pct = (i + 1) / n * 100
         r["parts"][3] = 1 if pct <= RS_TOP else (-1 if pct > 100 - RS_TOP else 0)
     # 1개월 RS 순위 (점수에는 넣지 않고 표시·급상승 판정에만 사용)
-    ranked1 = sorted([r for r in res if not np.isnan(r["ret1"])], key=lambda r: -r["ret1"])
+    ranked1 = sorted([r for r in res if not np.isnan(r["ret1"]) and r["t"] not in LEVERAGED], key=lambda r: -r["ret1"])
     for i, r in enumerate(ranked1):
         r["rank1"] = i + 1
+    # 그룹 보드용 백분위 (100 = 가장 강함), RSP 대비 1주 가중 / 1개월
+    for key, out in (("ex1w", "p1w"), ("ex1m", "p1m")):
+        pool = sorted([r for r in res if r["t"] not in LEVERAGED and not np.isnan(r[key])], key=lambda r: r[key])
+        for i, r in enumerate(pool):
+            r[out] = round(i / max(len(pool) - 1, 1) * 100)
     for r in res:
+        r.setdefault("p1w", None)
+        r.setdefault("p1m", None)
         r.setdefault("rank", None)
         r.setdefault("rank1", None)
         # 백분위 (0 = 1위, 100 = 꼴찌)
@@ -427,6 +456,42 @@ JUMP_HEAD = (fit("TICKER", 7) + fit("RS3", 5, True) + fit("RS1", 5, True) + fit(
              + fit("3M%", 7, True) + fit("고점%", 7, True) + "  신호 설명")
 
 
+BOARD_HEAD = (fit("TICKER", 7) + fit("1주RS", 6, True) + fit("1M RS", 6, True) + fit("1주vs", 7, True)
+              + fit("1M vs", 7, True) + fit("1D%", 6, True) + fit("고점%", 7, True) + "  설명")
+
+
+def board_line(r: dict) -> str:
+    hot = "🔥" if (r["p1w"] or 0) >= HOT_W1 and (r["p1m"] if r["p1m"] is not None else 100) <= HOT_M1 else "  "
+    p1w = f"{r['p1w']}" if r["p1w"] is not None else "-"
+    p1m = f"{r['p1m']}" if r["p1m"] is not None else "-"
+    return (fit(r["t"], 7) + fit(p1w, 6, True) + fit(p1m, 6, True) + f"{r['ex1w']:>+7.1f}{r['ex1m']:>+7.1f}"
+            f"{r['chg']:>+6.1f}{r['hi']:>7.1f} {hot}" + r["desc"])
+
+
+def send_board(etf_res: list[dict], session):
+    by = {r["t"]: r for r in etf_res if r.get("p1w") is not None}
+    bench = by.get(RS_BENCH)
+    note = f" · {RS_BENCH} 오늘 {bench['chg']:+.1f}%" if bench else ""
+    post(f"**📊 그룹 RS 보드 | {RS_BENCH}(동일가중) 기준 · {session}**{note}\n"
+         "1주 가중 RS 순 정렬 · 🔥 = 1주 RS 상위인데 1개월 RS는 아직 낮음 (막 강해지는 그룹)")
+    used = set()
+    for title, keys in (("지수", BOARD_INDEX), ("사이즈·스타일", BOARD_STYLE), ("SPDR 섹터", BOARD_SECTOR)):
+        rows = sorted([by[k] for k in keys if k in by], key=lambda r: -r["p1w"])
+        used |= set(keys)
+        if rows:
+            send_block(title, BOARD_HEAD, [board_line(r) for r in rows])
+    rest = sorted([r for t, r in by.items() if t not in used and t not in BOARD_BROAD], key=lambda r: -r["p1w"])
+    if rest:
+        send_block(f"업종·테마 그룹 · 1주 RS 상위 {min(BOARD_TOP, len(rest))}", BOARD_HEAD,
+                   [board_line(r) for r in rest[:BOARD_TOP]])
+        if len(rest) > BOARD_TOP and BOARD_BOTTOM:
+            send_block(f"업종·테마 그룹 · 1주 RS 하위 {BOARD_BOTTOM}", BOARD_HEAD,
+                       [board_line(r) for r in rest[-BOARD_BOTTOM:][::-1]])
+    post(f"1주RS·1M RS = {RS_BENCH} 대비 초과수익의 백분위 (100 = 가장 강함, 레버리지 제외) · "
+         f"1주vs = 최근 5일 {RS_BENCH} 대비 초과수익 % (최근 날에 가중) · 1M vs = 1개월 {RS_BENCH} 대비 초과수익 % · "
+         "고점% = 52주 고점 대비")
+
+
 # ───────────── 실행 ─────────────
 def main():
     etfs = load_etfs()
@@ -484,6 +549,9 @@ def main():
         send_block(f"🌡️ 위기지표 | {icon} {cr['level']} (🔴 {cr['alarms']} · 🟡 {cr['warns']})", None,
                    [f"{LIGHT[sg]} " + fit(name, 10) + desc for sg, name, desc in cr["rows"]])
 
+    # ①-3 그룹 RS 보드
+    send_board(etf_res, session)
+
     # ② 신호 바뀐 ETF
     changed = [r for r in etf_res if r["t"] in prev and prev[r["t"]] != r["light"]]
     if changed:
@@ -514,7 +582,7 @@ def main():
     post("점수 = 단기추세 + 장기추세 + 분산일 + RS + 52주고점 (각 -1~+1) · +3 이상 🟢, -3 이하 🔴\n"
          f"RS3 = 3개월 수익률 순위 · RS1 = 1개월 수익률 순위 ({len(etf_res)}개 중, 1 = 가장 강함) · 고점% = 52주 고점 대비 · 분산 = 최근 {DIST_WINDOW}일 분산일\n"
          f"🚀 급상승 = 1개월 순위가 3개월 순위보다 {RS_JUMP:.0f}%p 이상 오르고 상위 {RS_JUMP_TOP:.0f}% 안 · 📉 급락 = 반대\n"
-         "\\* 레버리지는 고점% 점수 제외, 채권·금·원자재는 분산일 점수 제외")
+         "\\* 레버리지·인버스는 RS 순위·고점% 점수 제외, 채권·금·원자재는 분산일 점수 제외")
     if missing:
         post("⚠️ 시세를 받지 못한 ETF: " + ", ".join(missing))
     print(f"완료: 시장 {m['score']:+d}, 위기 {cr['level']}, ETF {len(etf_res)}개, 바뀐 신호 {len(changed)}개")
