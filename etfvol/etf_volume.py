@@ -182,6 +182,16 @@ def main():
             rows = [h for h in hits if h["flow"] == key]
             if rows:
                 send_table(title, rows, dates)
+        try:
+            import charts
+            col = {"유입": charts.GREEN, "이탈": charts.RED, "혼조": charts.GRAY}
+            top = sorted(hits, key=lambda h: -h["rv3"])[:25]
+            charts.safe(lambda: charts.send(charts.hbar(
+                [(f"{h['t']} {h['desc'][:8]}", h["rv3"], col[h["flow"]]) for h in top],
+                f"ETF 거래량 3일 평균 배수 · {span}", "초록 = 유입 · 빨강 = 이탈 · 회색 = 혼조 (평소 20일 평균 = 1배)",
+                unit="배", fmt="{:.1f}"), filename="etf_volume.png"))
+        except Exception as e:
+            print(f"[경고] 차트 건너뜀: {e}")
         post(f"숫자 = 평소(직전 {LOOKBACK_DAYS}거래일 평균) 대비 거래량 배수 · 3일% = 3일 등락 · "
              f"위치 = 3일 저가(0)~고가(100) 중 종가\n"
              f"패턴: 📶증가 매일 늘어남 · 🔁지속 3일 모두 {HIGH_DAY:g}배↑ · ⚡급증 마지막 날만 · 🔻감소 줄어드는 중")

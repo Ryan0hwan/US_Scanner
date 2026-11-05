@@ -492,6 +492,25 @@ def send_board(etf_res: list[dict], session):
          "고점% = 52주 고점 대비")
 
 
+def send_charts(etf_res: list[dict], session):
+    """① SPDR 섹터 1개월 수익률 막대 ② 1주·1개월 RS 4분면"""
+    import charts
+    by = {r["t"]: r for r in etf_res}
+    items = [(f"{t} {by[t]['desc'][:8]}", by[t]["ret1"]) for t in BOARD_SECTOR if t in by and by[t]["ret1"] == by[t]["ret1"]]
+    if items:
+        ref = (RS_BENCH, by[RS_BENCH]["ret1"]) if RS_BENCH in by else None
+        charts.send(charts.hbar(items, f"SPDR 섹터 1개월 수익률 · {session}",
+                                f"노란 점선 = {RS_BENCH}(동일가중) 1개월 수익률", ref=ref), filename="sectors.png")
+    pts = [(r["t"], r["p1m"], r["p1w"]) for r in etf_res
+           if r.get("p1w") is not None and r.get("p1m") is not None and r["t"] not in BOARD_BROAD]
+    if pts:
+        def lab(t, x, y):
+            return t in BOARD_SECTOR or y >= 80 or y <= 12 or x >= 88
+        charts.send(charts.quadrant(pts, f"ETF RS 4분면 · {RS_BENCH} 기준 · {session}",
+                                    "가로 = 1개월 RS, 세로 = 1주 RS (백분위, 100 = 가장 강함) · 레버리지 제외",
+                                    "1개월 RS →", "1주 RS →", label_if=lab), filename="rs_quadrant.png")
+
+
 # ───────────── 실행 ─────────────
 def main():
     etfs = load_etfs()
@@ -551,6 +570,11 @@ def main():
 
     # ①-3 그룹 RS 보드
     send_board(etf_res, session)
+    try:
+        import charts
+        charts.safe(send_charts, etf_res, session)
+    except Exception as e:
+        print(f"[경고] 차트 건너뜀: {e}")
 
     # ② 신호 바뀐 ETF
     changed = [r for r in etf_res if r["t"] in prev and prev[r["t"]] != r["light"]]

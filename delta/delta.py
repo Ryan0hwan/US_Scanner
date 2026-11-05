@@ -45,12 +45,13 @@ UA = {"User-Agent": "Mozilla/5.0 (volume-delta)"}
 
 # ───────────── 종목 목록 ─────────────
 def _sp500() -> pd.DataFrame:
-    cache = STATE / "sp500.csv"
+    cache = STATE / "sp500_v2.csv"
     if not cache.exists() or time.time() - cache.stat().st_mtime > 7 * 86400:
         try:
             html = requests.get("https://en.wikipedia.org/wiki/List_of_S%26P_500_companies", headers=UA, timeout=30).text
             t = pd.read_html(io.StringIO(html))[0]
-            df = pd.DataFrame({"ticker": t["Symbol"].astype(str).str.replace(".", "-", regex=False), "name": t["Security"]})
+            df = pd.DataFrame({"ticker": t["Symbol"].astype(str).str.replace(".", "-", regex=False), "name": t["Security"],
+                               "sector": t["GICS Sector"]})
             if len(df) > 400:
                 df.to_csv(cache, index=False)
         except Exception as e:
@@ -278,6 +279,33 @@ def send_win_table(title: str, rows: list[dict], N: int):
         first, part = False, part + 1
 
 
+SECTOR_KR = {"Information Technology": "기술", "Health Care": "헬스케어", "Financials": "금융",
+             "Consumer Discretionary": "경기소비재", "Consumer Staples": "필수소비재", "Industrials": "산업재",
+             "Energy": "에너지", "Materials": "소재", "Utilities": "유틸리티", "Real Estate": "부동산",
+             "Communication Services": "커뮤니케이션"}
+
+
+def sector_chart(cur: list[dict], session):
+    """⑥ S&P 500 섹터별 오늘 델타 합계 (돈이 장중에 어느 섹터로 몰렸나)"""
+    import charts
+    cache = STATE / "sp500_v2.csv"
+    if not cache.exists():
+        return
+    sec = dict(pd.read_csv(cache).fillna("")[["ticker", "sector"]].itertuples(index=False))
+    agg, cnt = {}, {}
+    for r in cur:
+        sct = SECTOR_KR.get(sec.get(r["t"], ""), "")
+        if r["kind"] != "stock" or not sct:
+            continue
+        agg[sct] = agg.get(sct, 0.0) + r["delta_usd"] / 1e6
+        cnt[sct] = cnt.get(sct, 0) + 1
+    if agg:
+        charts.send(charts.hbar([(f"{k} ({cnt[k]})", v) for k, v in agg.items()],
+                                f"섹터별 거래량 델타 합계 · {session}",
+                                "S&P 500 종목의 그날 델타(오른 5분봉 − 내린 5분봉 거래량 × 종가) 합계 · 괄호 = 종목 수",
+                                unit="M$", fmt="{:+,.0f}"), filename="delta_sectors.png")
+
+
 # ───────────── 실행 ─────────────
 def main():
     now = dt.datetime.now(NY)
@@ -351,6 +379,11 @@ def main():
         post("델타$ = (오른 5분봉 거래량 − 내린 5분봉 거래량) × 종가 · 쏠림% = 델타 ÷ 거래량 · 평균x = 델타 ÷ 평소 평균 델타 크기\n"
              "양봉 = 델타 플러스인 날 수 · 큰양봉 = 평소의 2배 넘는 양봉 델타 횟수 · RVOL = 기간 평균 거래량 ÷ 평소 · "
              "누적 표는 누적델타 ÷ 평소 크기가 큰 순")
+    try:
+        import charts
+        charts.safe(sector_chart, cur, session)
+    except Exception as e:
+        print(f"[경고] 차트 건너뜀: {e}")
     if len(results) < len(tickers) * 0.5:
         post(f"⚠️ 거래량 델타: 시세를 {len(results)}/{len(tickers)}종목만 받았습니다. 일시적 오류일 수 있습니다.")
     print(f"완료: 확인 {len(results)}개, 하루 {len(day_hits)}개, 누적 " + ", ".join(f"{N}일 {len(v)}개" for N, v in win_hits.items()))
