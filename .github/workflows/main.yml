@@ -75,7 +75,11 @@ jobs:
 
       # 공통 목록(watchlist.txt, etfs.txt)을 각 시스템 폴더로 복사
       - if: steps.go.outputs.run == '1'
-        run: cp watchlist.txt etfs.txt ${{ matrix.sys }}/
+        run: cp watchlist.txt etfs.txt charts.py ${{ matrix.sys }}/
+
+      # 차트(그림) 한글 글꼴
+      - if: steps.go.outputs.run == '1' && contains(fromJSON('["light","etfvol","delta"]'), matrix.sys)
+        run: (sudo apt-get update -qq && sudo apt-get install -y -qq fonts-nanum) > /dev/null || true
 
       # 시스템별 상태(재알림 방지, 종목 목록 캐시)를 다음 실행으로 넘김
       - uses: actions/cache@v4
