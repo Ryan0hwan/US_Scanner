@@ -51,6 +51,12 @@ LT_LINES = {
     "W-VWMA100": ("1wk", "vwma", 100, float(os.environ.get("LT_TOL_W", "2")), 13, 26),  # 13주 전보다 상승, 6개월 첫 터치
     "M-VWMA100": ("1mo", "vwma", 100, float(os.environ.get("LT_TOL_M", "3")), 6, 12),   # 6개월 전보다 상승, 12개월 첫 터치
 }
+# ── 이평선 돌파(회복): 아래에 있던 주가가 선 위로 올라온 종목 ──
+CROSS_ENABLE = os.environ.get("CROSS_ENABLE", "1") == "1"
+CROSS_DAYS = int(os.environ.get("CROSS_DAYS", "2"))                 # 최근 N거래일 안에 돌파 (오늘 포함)
+CROSS_MAX_ABOVE = float(os.environ.get("CROSS_MAX_ABOVE", "3"))     # 지금 종가가 선 위 이 % 이내만 (너무 멀리 간 종목 제외)
+CROSS_BELOW_DAYS = int(os.environ.get("CROSS_BELOW_DAYS", "3"))     # 돌파 직전 이 일수 이상 선 아래에 있었어야 함 (선 위아래로 왔다 갔다 하는 종목 제외)
+CROSS_LINES = ["100D VWMA", "50D SMA"]
 WEBHOOK = os.environ.get("DISCORD_WEBHOOK_URL", "")
 FORCE = os.environ.get("FORCE", "0") == "1"            # 장 시간이 아니어도 강제 실행
 # ──────────────────────────────────────────────────────
@@ -301,6 +307,52 @@ def company_name(ticker: str) -> str:
 
 
 # ───────────── 디스코드 ─────────────
+def check_cross(df: pd.DataFrame, today: dt.date | None, min_dollar_vol: float = MIN_DOLLAR_VOL) -> list[dict]:
+    """최근 CROSS_DAYS일 안에 아래 → 위로 돌파하고, 지금 선 위 CROSS_MAX_ABOVE% 이내인 선"""
+    df = df.dropna(subset=["Close", "High", "Low", "Volume"])
+    if len(df) < 120 or (today is not None and df.index[-1].date() != today):
+        return []
+    c, v = df["Close"], df["Volume"]
+    if c.iloc[-1] < MIN_PRICE or (c * v).tail(50).mean() < max(MIN_DOLLAR_VOL, min_dollar_vol):
+        return []
+    series = {"50D SMA": c.rolling(50).mean(), "100D VWMA": (c * v).rolling(100).sum() / v.rolling(100).sum()}
+    s200 = c.rolling(200).mean()
+    vavg = v.iloc[-51:-1].mean()
+    out = []
+    for name in CROSS_LINES:
+        ma = series[name]
+        if pd.isna(ma.iloc[-1]) or not c.iloc[-1] > ma.iloc[-1]:
+            continue
+        dist = (c.iloc[-1] / ma.iloc[-1] - 1) * 100
+        if dist > CROSS_MAX_ABOVE:
+            continue
+        for k in range(1, CROSS_DAYS + 1):                           # k=1 오늘, k=2 어제 …
+            i = len(c) - k
+            before = slice(i - CROSS_BELOW_DAYS, i)
+            if c.iloc[i] > ma.iloc[i] and (c.iloc[before] < ma.iloc[before]).all() and (c.iloc[i:] > ma.iloc[i:]).all():
+                out.append({"line": name, "ma": float(ma.iloc[-1]), "last": float(c.iloc[-1]), "dist": float(dist),
+                            "when": "오늘" if k == 1 else "어제" if k == 2 else f"{k - 1}일전",
+                            "vol": float(v.iloc[i] / vavg) if vavg > 0 else float("nan"),
+                            "golden": bool(not pd.isna(s200.iloc[-1]) and series["50D SMA"].iloc[-1] > s200.iloc[-1])})
+                break
+    return out
+
+
+def send_cross_table(title: str, rows: list[dict]):
+    head = f"{'TICKER':<7}{'돌파':<3}{'LINE':>9}{'LAST':>9}{'위%':>5}{'VOLx':>6}{'정배열':>4}  NAME"
+    lines = [f"{r['ticker']:<7}{r['when']:<3}{r['ma']:>9.2f}{r['last']:>9.2f}{r['dist']:>+6.1f}{r['vol']:>6.1f}"
+             f"{('✓' if r['golden'] else '-'):>7}  {r['name'][:22]}" for r in rows]
+    first = True
+    while lines:
+        block, size = [], 0
+        while lines and size + len(lines[0]) + 1 < 1700:
+            size += len(lines[0]) + 1
+            block.append(lines.pop(0))
+        header = f"**{title}**\n" if first else ""
+        post(f"{header}```\n{head}\n" + "\n".join(block) + "\n```")
+        first = False
+
+
 def post(content: str):
     if not WEBHOOK:
         print(content)
@@ -492,6 +544,7 @@ def main():
 
     found: dict[tuple, list] = {}
     hp_rows: list[dict] = []
+    cross_rows: list[dict] = []
     lt_daily: dict[str, pd.DataFrame] = {}
     lt_run = LT_ENABLE and (FORCE or not LT_ONLY_LAST_RUN or now.time() >= dt.time(15, 30))
     scanned = 0
@@ -506,6 +559,13 @@ def main():
             mc = market_cap(ticker, touches[0]["last"])
             if mc is not None and mc < RUSSELL_MIN_MCAP:
                 touches = []
+        if CROSS_ENABLE:
+            for x in check_cross(df, None if FORCE else today,
+                                 RUSSELL_MIN_DOLLAR_VOL if is_russell else MIN_DOLLAR_VOL):
+                key = f"X|{ticker}|{x['line']}"
+                if key not in sent:
+                    sent.add(key)
+                    cross_rows.append({"ticker": ticker, "name": str(meta[ticker].name) or company_name(ticker), **x})
         for t in touches:  # 테스트 실행은 최근 거래일 기준
             m = meta[ticker]
             name = str(m.name) or company_name(ticker)
@@ -535,6 +595,18 @@ def main():
     elif HP_ENABLE and FORCE:
         post("⭐ [확률높은종목] 이번 실행에는 조건을 모두 통과한 종목이 없습니다.")
 
+    if CROSS_ENABLE:
+        for line in CROSS_LINES:
+            rows = sorted([r for r in cross_rows if r["line"] == line], key=lambda r: (r["when"] != "오늘", r["dist"]))
+            if rows:
+                send_cross_table(f"🔼 {line} 돌파(회복) {now:%b} {now.day} | 최근 {CROSS_DAYS}일 안에 선 아래 → 위 · "
+                                 f"지금 선 위 {CROSS_MAX_ABOVE:g}% 이내 ({len(rows)})", rows)
+        if cross_rows:
+            post(f"돌파 = 직전 {CROSS_BELOW_DAYS}일 이상 종가가 선 아래 → 종가가 선 위로 올라와 지금까지 유지 · "
+                 "LINE = 오늘 선 값 · 위% = 종가가 선보다 몇 % 위 · VOLx = 돌파한 날 거래량 ÷ 50일 평균 · 정배열 ✓ = 50일선 > 200일선")
+        elif FORCE:
+            post("🔼 이평선 돌파(회복): 이번 실행에는 조건을 통과한 종목이 없습니다.")
+
     lt_rows: list[dict] = []
     if lt_run and lt_daily:
         cands = list(lt_daily)
@@ -560,7 +632,8 @@ def main():
     if scanned < len(meta) * 0.5:
         post(f"⚠️ MA 스캐너: 시세를 {scanned}/{len(meta)}종목만 받았습니다. 일시적 오류일 수 있습니다.")
     if FORCE:
-        post(f"✅ MA 스캐너 테스트 완료: {scanned}종목 확인, 터치 {total}건 · 확률높은종목 {len(hp_rows)}건 · 장기 지지선 {len(lt_rows)}건 (최근 거래일 기준)")
+        post(f"✅ MA 스캐너 테스트 완료: {scanned}종목 확인, 터치 {total}건 · 확률높은종목 {len(hp_rows)}건 · "
+             f"돌파(회복) {len(cross_rows)}건 · 장기 지지선 {len(lt_rows)}건 (최근 거래일 기준)")
     else:
         sent_file.write_text(json.dumps(sorted(sent)))
 
