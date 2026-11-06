@@ -31,7 +31,8 @@ MAX_TICKERS = int(os.environ.get("MAX_TICKERS", "10"))         # 자동 모드 �
 MIN_MCAP = float(os.environ.get("MIN_MCAP", "2000000000"))     # 자동 모드 최소 시가총액($)
 EXTRA = [t.strip().upper() for t in os.environ.get("EARN_TICKERS", "").split(",") if t.strip()]  # 실적 일정과 상관없이 항상 볼 종목
 STRIKE_RANGE = float(os.environ.get("STRIKE_RANGE", "25"))     # 히트맵 행사가 범위: 현재가 ±%
-MAX_STRIKES = int(os.environ.get("MAX_STRIKES", "28"))          # 히트맵 최대 줄 수
+MAX_STRIKES = int(os.environ.get("MAX_STRIKES", "36"))          # 히트맵 최대 줄 수 (넘으면 GEX 큰 행사가 위주)
+ALL_DAYS = int(os.environ.get("ALL_DAYS", "90"))               # '전체 만기' 집계 범위(일): 총거래량·Net GEX·콜월·풋월
 HIST_N = int(os.environ.get("HIST_N", "8"))                    # 과거 실적 반응 횟수
 WEBHOOK = os.environ.get("DISCORD_WEBHOOK_URL", "")
 FORCE = os.environ.get("FORCE", "0") == "1"
@@ -262,7 +263,9 @@ def fetch(t: str, ev: dict | None) -> dict:
         except Exception:
             pass
     # 옵션 체인: 실적 반영 첫 만기 + 다음 2개
-    exps = list(tk.options or [])
+    now = dt.datetime.now(NY)
+    exps = [e for e in (tk.options or []) if dt.date.fromisoformat(e) > now.date()
+            or (dt.date.fromisoformat(e) == now.date() and now.time() < dt.time(16, 0))]   # 이미 끝난 만기 제외
     if not exps:
         raise RuntimeError("옵션 없음")
     edate = ev.get("date")
@@ -279,18 +282,40 @@ def fetch(t: str, ev: dict | None) -> dict:
         oc = tk.option_chain(e)
         chains[e] = (oc.calls, oc.puts)
         time.sleep(0.3)
-    near = {}                                               # 풋/콜 비율·거래량 상위: 45일 이내 만기 전체
-    today = dt.datetime.now(NY).date()
+    allx = {}                                               # ALL_DAYS 이내 모든 만기 (총거래량·Net GEX·월)
+    today = now.date()
     for e in exps:
-        if (dt.date.fromisoformat(e) - today).days > 45:
+        if (dt.date.fromisoformat(e) - today).days > ALL_DAYS:
             break
         if e in chains:
-            near[e] = chains[e]
+            allx[e] = chains[e]
         else:
             oc = tk.option_chain(e)
-            near[e] = (oc.calls, oc.puts)
+            allx[e] = (oc.calls, oc.puts)
             time.sleep(0.3)
-    return {"t": t, "S": S, "chg": chg, "px": px, "ed": ed, "ev": ev, "est": est, "chains": chains, "near": near}
+    near = {e: v for e, v in allx.items() if (dt.date.fromisoformat(e) - today).days <= 45}
+    return {"t": t, "S": S, "chg": chg, "px": px, "ed": ed, "ev": ev, "est": est, "chains": chains, "near": near, "allx": allx}
+
+
+def vol_history(t: str, vol: float) -> dict:
+    """종목별 하루 옵션 총거래량을 state에 쌓아 3·7·30일 평균 대비 %"""
+    import json
+    f = STATE / "optvol.json"
+    db = json.loads(f.read_text()) if f.exists() else {}
+    day = dt.datetime.now(NY).date()
+    if dt.datetime.now(NY).time() < dt.time(9, 30) or day.weekday() >= 5:
+        day = (pd.Timestamp(day) - pd.offsets.BDay(1)).date()    # 장 시작 전·주말 실행은 직전 거래일 거래량
+    h = db.get(t, {})
+    past = [v for k, v in sorted(h.items()) if k != str(day)]
+    out = {"n": len(past)}
+    for n in (3, 7, 30):
+        if len(past) >= n:
+            avg = sum(past[-n:]) / n
+            out[n] = vol / avg * 100 if avg else None
+    h[str(day)] = vol
+    db[t] = dict(sorted(h.items())[-40:])
+    f.write_text(json.dumps(db))
+    return out
 
 
 # ───────────── 분석 ─────────────
@@ -319,6 +344,29 @@ def analyze(d: dict) -> dict:
                     rows.append({"exp": e, "k": float(r["strike"]), "cp": cp, "vol": vol, "oi": oi,
                                  "prem": vol * mid(r) * 100, "iv": float(r.get("impliedVolatility") or 0)})
     top = sorted(rows, key=lambda x: -x["prem"])[:10]
+    # 전체 만기(ALL_DAYS 이내) 집계
+    allx = d["allx"]
+    tv_c = sum(c["volume"].fillna(0).sum() for c, p in allx.values())
+    tv_p = sum(p["volume"].fillna(0).sum() for c, p in allx.values())
+    oi_c = sum(c["openInterest"].fillna(0).sum() for c, p in allx.values())
+    oi_p = sum(p["openInterest"].fillna(0).sum() for c, p in allx.values())
+    pr_c = sum(sum(float(r.get("volume") or 0) * mid(r) * 100 for _, r in c.iterrows()) for c, p in allx.values())
+    pr_p = sum(sum(float(r.get("volume") or 0) * mid(r) * 100 for _, r in p.iterrows()) for c, p in allx.values())
+    cg_all = gex_table(S, {e: (c, c.iloc[0:0]) for e, (c, p) in allx.items()}).sum(axis=1)
+    pg_all = gex_table(S, {e: (p.iloc[0:0], p) for e, (c, p) in allx.items()}).sum(axis=1)
+    first_exp = next(iter(allx))
+    allstat = {
+        "days": ALL_DAYS, "n_exp": len(allx), "vol": tv_c + tv_p,
+        "share_vol": tv_c / (tv_c + tv_p) * 100 if tv_c + tv_p else None,
+        "share_oi": oi_c / (oi_c + oi_p) * 100 if oi_c + oi_p else None,
+        "share_prem": pr_c / (pr_c + pr_p) * 100 if pr_c + pr_p else None,
+        "pc_vol": tv_p / tv_c if tv_c else None, "pc_oi": oi_p / oi_c if oi_c else None,
+        "net_gex": float(cg_all.sum() + pg_all.sum()),
+        "call_wall": float(cg_all.idxmax()) if len(cg_all) and cg_all.max() > 0 else None,
+        "put_wall": float(pg_all.idxmin()) if len(pg_all) and pg_all.min() < 0 else None,
+        "flip": gamma_flip(S, allx), "near_exp": first_exp, "near_pain": max_pain(*allx[first_exp]),
+        "hist": vol_history(d["t"], tv_c + tv_p),
+    }
     hist = past_reactions(d["ed"], d["px"])
     return {
         "e0": e0, "exps": exps, "atm0": a0, "atm1": a1, "gex": g,
@@ -328,7 +376,7 @@ def analyze(d: dict) -> dict:
         "flip": gamma_flip(S, chains), "max_pain": max_pain(*chains[e0]),
         "pc_vol": pv / cv if cv else None, "pc_oi": poi / coi if coi else None,
         "call_prem": sum(x["prem"] for x in rows if x["cp"] == "C"), "put_prem": sum(x["prem"] for x in rows if x["cp"] == "P"),
-        "top": top, "hist": hist,
+        "top": top, "hist": hist, "all": allstat,
     }
 
 
@@ -372,9 +420,25 @@ def report(name: str, d: dict, a: dict):
         if a[k]:
             lv.append(f"{lab} ${a[k]:,.2f}".replace(".00", ""))
     if lv:
-        L.append(f"GEX 레벨         " + " · ".join(lv) + f"  (만기 {', '.join(e[5:] for e in a['exps'])} 합산, 맥스페인은 {a['e0'][5:]})")
+        L.append(f"실적 만기 GEX    " + " · ".join(lv) + f"  (만기 {', '.join(e[5:] for e in a['exps'])} 합산, 맥스페인은 {a['e0'][5:]})")
     if a["pc_vol"] is not None:
-        L.append(f"풋/콜 비율       거래량 {a['pc_vol']:.2f} · 미결제 {a['pc_oi']:.2f} · 오늘 프리미엄 콜 ${money(a['call_prem'])} / 풋 ${money(a['put_prem'])}")
+        L.append(f"45일 이내 만기   풋/콜 거래량 {a['pc_vol']:.2f} · 미결제 {a['pc_oi']:.2f} · 오늘 프리미엄 콜 ${money(a['call_prem'])} / 풋 ${money(a['put_prem'])}")
+    A = a["all"]
+    if A["vol"]:
+        bar = lambda x: "-" if x is None else f"콜 {x:.0f} · 풋 {100 - x:.0f}"
+        hv = A["hist"]
+        vs = " · ".join(f"{n}일 평균 대비 {hv[n]:.0f}%" for n in (3, 7, 30) if hv.get(n)) or f"평소 대비: 기록 쌓는 중 ({hv['n']}일)"
+        L.append("```")
+        post("\n".join(L))
+        L = [f"**{t} 옵션 전체 현황** (만기 {A['days']}일 이내 {A['n_exp']}개)", "```"]
+        L.append(f"오늘 옵션 거래량  {A['vol']:,.0f}계약 · {vs}")
+        L.append(f"콜/풋 비중       거래량 {bar(A['share_vol'])} · 미결제 {bar(A['share_oi'])} · 프리미엄 {bar(A['share_prem'])}")
+        L.append(f"풋/콜 비율       거래량 {A['pc_vol']:.2f} · 미결제 {A['pc_oi']:.2f}" if A["pc_vol"] is not None else "풋/콜 비율       -")
+        lv = [f"콜월 ${A['call_wall']:g}" if A["call_wall"] else "", f"풋월 ${A['put_wall']:g}" if A["put_wall"] else "",
+              f"감마 플립 ${A['flip']:,.2f}" if A["flip"] else "", f"Net GEX {'-' if A['net_gex'] < 0 else ''}${money(abs(A['net_gex']))}"]
+        L.append("감마 레벨        " + " · ".join(x for x in lv if x) + ("  (마이너스 = 변동성 커지기 쉬움)" if A["net_gex"] < 0 else "  (플러스 = 변동성 눌림)"))
+        if A["near_pain"]:
+            L.append(f"맥스페인 (가장 가까운 만기 {A['near_exp'][5:]})  ${A['near_pain']:g}")
     L.append("```")
     post("\n".join(L))
 
@@ -411,12 +475,14 @@ def heatmap(t: str, S: float, a: dict, ev: dict):
     if g.empty:
         return
     if len(g) > MAX_STRIKES:
-        near = sorted(g.index, key=lambda k: abs(k - S))[:MAX_STRIKES]
-        g = g.loc[sorted(near)]
+        near = set(sorted(g.index, key=lambda k: abs(k - S))[:10])          # 현재가 근처 10줄은 항상
+        big = g.abs().sum(axis=1).sort_values(ascending=False).index          # 나머지는 GEX 큰 행사가
+        keep = list(near) + [k for k in big if k not in near][:MAX_STRIKES - len(near)]
+        g = g.loc[sorted(keep)]
     g = g.iloc[::-1]                                                       # 위 = 높은 행사가
     vals = g.to_numpy(float)
     vmax = np.nanmax(np.abs(vals)) or 1
-    fig, ax = plt.subplots(figsize=(3.2 + 2.2 * g.shape[1], 0.34 * len(g) + 2.0))
+    fig, ax = plt.subplots(figsize=(4.5 + 3.0 * g.shape[1], 0.42 * len(g) + 2.2))
     fig.subplots_adjust(bottom=0.06)
     from matplotlib.colors import LinearSegmentedColormap
     cmap = LinearSegmentedColormap.from_list("gex", ["#ff2a2a", "#5a1a1d", "#16181d", "#14482a", "#2bff6a"])
@@ -425,7 +491,7 @@ def heatmap(t: str, S: float, a: dict, ev: dict):
         for j in range(vals.shape[1]):
             v = vals[i, j]
             if v == v and abs(v) > 0:
-                ax.text(j, i, money(v), ha="center", va="center", fontsize=8,
+                ax.text(j, i, money(v), ha="center", va="center", fontsize=10,
                         color="black" if abs(v) > vmax * 0.6 else "white")
     ax.set_xticks(np.arange(-0.5, vals.shape[1]), minor=True)
     ax.set_yticks(np.arange(-0.5, vals.shape[0]), minor=True)
