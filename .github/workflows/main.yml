@@ -6,25 +6,28 @@ on:
     - cron: "10 22 * * 1-5"   # 한국 07:10 장 마감 후 확정
   workflow_dispatch:
     inputs:
-      system:
-        description: "실행할 시스템 (all = 전부)"
-        type: choice
-        default: all
-        options: [all, light, ratio, etfvol, rs, trend, vcp, triangle, bb, ma, delta, pullback, island, earnings]
-      force:
-        description: "테스트 실행 (주말·장 시간과 상관없이 최근 거래일 기준)"
-        type: boolean
-        default: true
-      diagnose:
-        description: "진단할 티커 (vcp·triangle·delta·pullback·island·earnings만, 예: NVDA, AAPL). 진단만 보려면 system도 하나만 고르세요"
-        type: string
-        default: ""
+      run_all:     { description: "✅ 전부 실행 (체크하면 아래 선택과 상관없이 13개 모두)", type: boolean, default: false }
+      light:       { description: "신호등 (시장·ETF·그룹 RS)", type: boolean, default: false }
+      ratio:       { description: "비교지표", type: boolean, default: false }
+      etfvol:      { description: "ETF 거래량", type: boolean, default: false }
+      rs:          { description: "RS 대시보드", type: boolean, default: false }
+      trend:       { description: "트렌드 템플릿", type: boolean, default: false }
+      vcp:         { description: "VCP", type: boolean, default: false }
+      triangle:    { description: "업센딩 트라이앵글", type: boolean, default: false }
+      bb:          { description: "볼린저밴드", type: boolean, default: false }
+      ma:          { description: "이평선 (터치·돌파·장기 지지선)", type: boolean, default: false }
+      delta:       { description: "거래량 델타 (15~20분)", type: boolean, default: false }
+      pullback:    { description: "강세주 눌림목", type: boolean, default: false }
+      island:      { description: "아일랜드 갭", type: boolean, default: false }
+      earnings:    { description: "실적 플레이", type: boolean, default: false }
+      force:       { description: "테스트 실행 (주말·장 시간과 상관없이 최근 거래일 기준)", type: boolean, default: true }
+      diagnose:    { description: "진단할 티커 (vcp·triangle·delta·pullback·island·earnings, 예: NVDA, AAPL)", type: string, default: "" }
 
 permissions:
   contents: write        # RS 대시보드 결과(docs, rs/data)를 저장소에 저장
 
 concurrency:
-  group: us-scanners-${{ github.event_name }}-${{ github.event.schedule || inputs.system }}
+  group: us-scanners-${{ github.event_name }}-${{ github.event.schedule || github.run_id }}
   cancel-in-progress: false
 
 jobs:
@@ -50,13 +53,13 @@ jobs:
           - { sys: island,   script: island.py,       secret: US_WEBHOOK_ISLAND,   close_only: false }
           - { sys: earnings, script: earnings.py,     secret: US_WEBHOOK_EARNINGS, close_only: true  }
     steps:
-      # 실행 여부: 수동이면 고른 시스템만 / 23:50 장중 회차에는 '마감된 날'만 보는 델타·ETF 거래량은 건너뜀
+      # 실행 여부: 수동이면 체크한 시스템만 (전부 실행 체크 시 모두) / 23:50 장중 회차에는 '마감된 날'만 보는 델타·ETF 거래량은 건너뜀
       - name: Decide
         id: go
         run: |
           RUN=1
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            if [ "${{ inputs.system }}" != "all" ] && [ "${{ inputs.system }}" != "${{ matrix.sys }}" ]; then RUN=0; fi
+            if [ "${{ inputs.run_all || inputs[matrix.sys] }}" != "true" ]; then RUN=0; fi
           elif [ "${{ github.event.schedule }}" = "50 14 * * 1-5" ] && [ "${{ matrix.close_only }}" = "true" ]; then
             RUN=0
           fi
