@@ -10,13 +10,13 @@ on:
         description: "실행할 시스템 (all = 전부)"
         type: choice
         default: all
-        options: [all, light, ratio, etfvol, rs, trend, vcp, triangle, bb, ma, delta, pullback, island]
+        options: [all, light, ratio, etfvol, rs, trend, vcp, triangle, bb, ma, delta, pullback, island, earnings]
       force:
         description: "테스트 실행 (주말·장 시간과 상관없이 최근 거래일 기준)"
         type: boolean
         default: true
       diagnose:
-        description: "진단할 티커 (vcp·triangle·delta·pullback·island만, 예: NVDA, AAPL). 진단만 보려면 system도 하나만 고르세요"
+        description: "진단할 티커 (vcp·triangle·delta·pullback·island·earnings만, 예: NVDA, AAPL). 진단만 보려면 system도 하나만 고르세요"
         type: string
         default: ""
 
@@ -48,6 +48,7 @@ jobs:
           - { sys: delta,    script: delta.py,        secret: US_WEBHOOK_DELTA,    close_only: true  }
           - { sys: pullback, script: pullback.py,     secret: US_WEBHOOK_PULLBACK, close_only: false }
           - { sys: island,   script: island.py,       secret: US_WEBHOOK_ISLAND,   close_only: false }
+          - { sys: earnings, script: earnings.py,     secret: US_WEBHOOK_EARNINGS, close_only: true  }
     steps:
       # 실행 여부: 수동이면 고른 시스템만 / 23:50 장중 회차에는 '마감된 날'만 보는 델타·ETF 거래량은 건너뜀
       - name: Decide
@@ -78,7 +79,7 @@ jobs:
         run: cp watchlist.txt etfs.txt charts.py ${{ matrix.sys }}/
 
       # 차트(그림) 한글 글꼴
-      - if: steps.go.outputs.run == '1' && contains(fromJSON('["light","etfvol","delta"]'), matrix.sys)
+      - if: steps.go.outputs.run == '1' && contains(fromJSON('["light","etfvol","delta","earnings"]'), matrix.sys)
         run: (sudo apt-get update -qq && sudo apt-get install -y -qq fonts-nanum) > /dev/null || true
 
       # 시스템별 상태(재알림 방지, 종목 목록 캐시)를 다음 실행으로 넘김
@@ -96,7 +97,7 @@ jobs:
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets[matrix.secret] }}
           FORCE: ${{ github.event_name == 'workflow_dispatch' && inputs.force && '1' || '0' }}
-          DIAGNOSE: ${{ contains(fromJSON('["vcp","triangle","delta","pullback","island"]'), matrix.sys) && inputs.diagnose || '' }}
+          DIAGNOSE: ${{ contains(fromJSON('["vcp","triangle","delta","pullback","island","earnings"]'), matrix.sys) && inputs.diagnose || '' }}
           RS_DOCS: ${{ github.workspace }}/docs
 
       # RS 대시보드 페이지(docs/)와 순위 기록(rs/data)을 저장소에 저장 → GitHub Pages가 새 페이지 게시
