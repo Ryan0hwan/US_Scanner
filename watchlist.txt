@@ -267,6 +267,7 @@ FTI
 AEM
 AU
 
+
 # ── 차트 예시로 추가 ──
 OII, Oceaneering International
 
@@ -299,3 +300,9 @@ OKLO, Oklo
 LEU, Centrus Energy
 BABA, Alibaba
 JD, JD.com
+CGON, CG Oncology
+LION, Lionsgate Studios
+RYTM, Rhythm Pharmaceuticals
+WULF, TeraWulf
+SKM, SK Telecom
+EXTR, Extreme Networks
