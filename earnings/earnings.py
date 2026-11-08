@@ -141,8 +141,14 @@ def years_to(exp: str) -> float:
 
 
 def mid(row) -> float:
-    b, a, last = row.get("bid", 0) or 0, row.get("ask", 0) or 0, row.get("lastPrice", 0) or 0
-    return (b + a) / 2 if b > 0 and a > 0 else float(last)
+    def num(x):
+        try:
+            x = float(x)
+            return x if x == x else 0.0                                  # NaN → 0
+        except (TypeError, ValueError):
+            return 0.0
+    b, a, last = num(row.get("bid")), num(row.get("ask")), num(row.get("lastPrice"))
+    return (b + a) / 2 if b > 0 and a > 0 else last
 
 
 def gex_table(S: float, chains: dict[str, tuple[pd.DataFrame, pd.DataFrame]]) -> pd.DataFrame:
@@ -336,7 +342,10 @@ def analyze(d: dict) -> dict:
     coi = sum(c["openInterest"].fillna(0).sum() for c, p in near.values())
     poi = sum(p["openInterest"].fillna(0).sum() for c, p in near.values())
     rows = []
+    today = dt.datetime.now(NY).date().isoformat()
     for e, (c, p) in near.items():
+        if e == today:                                                     # 오늘 만기(0DTE)는 실적과 무관 → 계약 표에서 제외
+            continue
         for df, cp in ((c, "C"), (p, "P")):
             for _, r in df.iterrows():
                 vol, oi = float(r.get("volume") or 0), float(r.get("openInterest") or 0)
@@ -452,11 +461,11 @@ def report(name: str, d: dict, a: dict):
     if a["top"]:
         h = ["만기    행사가  C/P   거래량   미결제  Vol/OI  프리미엄   IV"]
         for x in a["top"]:
-            ratio = x["vol"] / x["oi"] if x["oi"] else float("inf")
             fire = "🔥" if x["vol"] > x["oi"] and x["vol"] >= 500 else "  "
-            h.append(f"{x['exp'][5:]}  {x['k']:>7g}   {x['cp']}  {x['vol']:>7,.0f}  {x['oi']:>7,.0f}  {min(ratio, 99):>5.1f}{fire}"
+            ratio = f"{x['vol'] / x['oi']:.1f}" if x["oi"] else "신규"
+            h.append(f"{x['exp'][5:]}  {x['k']:>7g}   {x['cp']}  {x['vol']:>7,.0f}  {x['oi']:>7,.0f}  {ratio:>5}{fire}"
                      f"{'$' + money(x['prem']):>8}  {x['iv']*100:>3.0f}%")
-        post(f"**{t} 오늘 프리미엄 큰 옵션 계약** (45일 이내 만기 · 현재가 ±20% 행사가 · 🔥 = 거래량이 미결제보다 많음 → 새 포지션 가능성, 매수/매도 방향은 모름)\n"
+        post(f"**{t} 오늘 프리미엄 큰 옵션 계약** (45일 이내 만기, 오늘 만기 제외 · 현재가 ±20% 행사가 · 🔥 = 거래량이 미결제보다 많음 → 새 포지션 가능성, 매수/매도 방향은 모름)\n"
              f"```\n" + "\n".join(h) + "\n```")
 
     try:
