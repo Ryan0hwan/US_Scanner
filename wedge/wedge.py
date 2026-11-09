@@ -31,11 +31,13 @@ MIN_DECLINE = 8.0          # 웻지 기간 위쪽 선 하락폭 최소 %
 SQUEEZE = 0.65             # 지금 두 선 간격 ÷ 시작 간격 최대 (수렴)
 MAX_BREAK_BELOW = 0.05     # 아래쪽 선을 2% 넘게 깨고 마감한 봉 비율 상한
 BREAKOUT_BARS = 5          # 돌파로 볼 최근 봉 수
+BO_VOL_MIN = 1.5           # 돌파일 거래량 ÷ 50일 평균 최소 (거래량 실린 돌파만)
+BO_CLOSE_POS = 0.5         # 돌파일 종가가 그날 고가~저가 중 위쪽 이 비율 이상 (윗꼬리만 긴 가짜 돌파 제외)
 NEAR_PCT = 3.0             # 위쪽 선 아래 이 % 이내 = 돌파 임박
 MAX_ABOVE = 10.0           # 돌파 후 선 위 이 % 넘게 간 종목은 제외
 SHOW_NEAR = False          # 돌파 임박(위쪽 선 아래 3% 이내)도 보내기. 기본은 돌파만
 SHOW_FORMING = False       # 형성 중 단계도 표로 보내기 (켜면 결과가 많아짐)
-IMG_MAX = 10                # 그림 최대 장 수 (돌파·임박만)
+IMG_MAX = 8                # 그림 최대 장 수 (돌파·임박만)
 REALERT_DAYS = 10          # 같은 종목·단계 재알림 금지 기간(일)
 # ──────────────────────────────────────────────────────
 
@@ -121,6 +123,15 @@ def find_wedge(df: pd.DataFrame) -> tuple[dict | None, str]:
             if pos > MAX_ABOVE:
                 why = f"돌파 후 선 위로 너무 멀리 감 ({pos:+.1f}%)"
                 continue
+            vavg_bo = v[max(0, bo - 50):bo].mean()
+            bvol = v[bo] / vavg_bo if vavg_bo > 0 else 0
+            if bvol < BO_VOL_MIN:
+                why = f"돌파했지만 거래량 부족 (평소의 {bvol:.1f}배 < {BO_VOL_MIN:g}배)"
+                continue
+            rng = h[bo] - l[bo]
+            if rng > 0 and (c[bo] - l[bo]) / rng < BO_CLOSE_POS:
+                why = "돌파일 종가가 그날 아래쪽에서 끝남 (윗꼬리 긴 약한 돌파)"
+                continue
             stage = "돌파"
         elif pos >= -NEAR_PCT:
             stage = "임박"
@@ -134,7 +145,8 @@ def find_wedge(df: pd.DataFrame) -> tuple[dict | None, str]:
         cand = {"stage": stage, "upper": float(U(n - 1)), "lower": float(Lw(n - 1)), "pos": pos,
                 "target": float(max(uv1, U(start))), "stop": float(l[-10:].min() * 0.99), "bars": n - 1 - start,
                 "touch": (tu, tl), "sqz": g1 / g0 * 100 if g0 else np.nan, "decline": -su * 100,
-                "vol": float(v[bo] / vavg) if bo is not None and vavg > 0 else float(v[-1] / vavg) if vavg > 0 else np.nan,
+                "vol": float(v[bo] / v[max(0, bo - 50):bo].mean()) if bo is not None and v[max(0, bo - 50):bo].mean() > 0
+                else float(v[-1] / vavg) if vavg > 0 else np.nan,
                 "above200": bool(not pd.isna(s200) and c[-1] > s200),
                 "lines": ((u1, uv1, u2, uv2), (l1, lv1, l2, lv2)), "start": start,
                 "key": df.index[start].date().isoformat()}
@@ -237,12 +249,12 @@ def main():
     new = [f for f in new if f["stage"] == "돌파" or (f["stage"] == "임박" and SHOW_NEAR)
            or (f["stage"] == "형성" and SHOW_FORMING)]
     cnt = lambda s: sum(1 for f in new if f["stage"] == s)
-    K.post(f"**📐 폴링 웻지 돌파 | {session}**\n🚀 돌파 {cnt('돌파')}"
+    K.post(f"**📐 폴링 웻지 돌파 (거래량 {BO_VOL_MIN:g}배 이상) | {session}**\n🚀 돌파 {cnt('돌파')}"
            + (f" · 🎯 돌파 임박 {cnt('임박')}" if SHOW_NEAR else "")
            + (f" · 🔨 형성 중 {cnt('형성')}" if SHOW_FORMING else "") +
            f" (새로 잡힌 것만, 확인 {len(data)}종목)")
     if not new:
-        K.post("오늘 새로 위쪽 선을 돌파한 폴링 웻지 없음")
+        K.post(f"오늘 새로 거래량 실린 돌파(평소 {BO_VOL_MIN:g}배 이상)가 나온 폴링 웻지 없음")
     for st in ["돌파"] + (["임박"] if SHOW_NEAR else []) + (["형성"] if SHOW_FORMING else []):
         rows = sorted([f for f in new if f["stage"] == st], key=lambda r: (-(r["touch"][0] + r["touch"][1]), r["sqz"]))
         if rows:
