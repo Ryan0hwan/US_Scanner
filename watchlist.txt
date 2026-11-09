@@ -267,7 +267,6 @@ FTI
 AEM
 AU
 
-
 # ── 차트 예시로 추가 ──
 OII, Oceaneering International
 
@@ -325,3 +324,31 @@ PCOR, Procore Technologies
 U, Unity Software
 TOST, Toast
 SHLS, Shoals Technologies
+KNSA, Kiniksa Pharmaceuticals
+XNCR, Xencor
+BETA, Beta Technologies
+LFST, LifeStance Health
+ACHC, Acadia Healthcare
+ALGT, Allegiant Travel
+SYRE, Spyre Therapeutics
+XPEV, XPeng
+GLBE, Global-E Online
+ELF, e.l.f. Beauty
+ORKA, Oruka Therapeutics
+YOU, Clear Secure
+EWTX, Edgewise Therapeutics
+ADPT, Adaptive Biotechnologies
+ELVN, Enliven Therapeutics
+COCO, Vita Coco
+INSM, Insmed
+RRX, Regal Rexnord
+KYMR, Kymera Therapeutics
+CELH, Celsius Holdings
+DUOL, Duolingo
+LOAR, Loar Holdings
+BLLN, BillionToOne
+ESAB, ESAB Corp
+TPC, Tutor Perini
+KD, Kyndryl
+WSC, WillScot Holdings
+LBTYA, Liberty Global
