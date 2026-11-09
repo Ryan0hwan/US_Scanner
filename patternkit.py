@@ -106,8 +106,8 @@ def pivots(h: np.ndarray, l: np.ndarray, k: int = 4, min_move: float = 3.0) -> l
     직전 반대 꼭짓점 대비 min_move% 미만 움직임은 잡음으로 제거 → H·L이 번갈아 나오는 목록"""
     n = len(h)
     raw = []
-    for i in range(k, n):
-        lo, hi = max(0, i - k), min(n, i + k + 1)
+    for i in range(k, n - k):                               # 오른쪽 k봉이 지나 확정된 꼭짓점만 (최근 봉이 선을 만들지 않게)
+        lo, hi = i - k, i + k + 1
         if h[i] == h[lo:hi].max():
             raw.append((i, "H", float(h[i])))
         if l[i] == l[lo:hi].min():
