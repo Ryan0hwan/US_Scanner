@@ -306,3 +306,22 @@ RYTM, Rhythm Pharmaceuticals
 WULF, TeraWulf
 SKM, SK Telecom
 EXTR, Extreme Networks
+MGNI, Magnite
+SARO, StandardAero
+BAM, Brookfield Asset Management
+PRMB, Primo Brands
+FBIN, Fortune Brands Innovations
+IAG, IAMGOLD
+TEM, Tempus AI
+BRKR, Bruker
+MDLN, Medline
+WRBY, Warby Parker
+RKT, Rocket Companies
+COMP, Compass
+SG, Sweetgreen
+BSY, Bentley Systems
+LYFT, Lyft
+PCOR, Procore Technologies
+U, Unity Software
+TOST, Toast
+SHLS, Shoals Technologies
