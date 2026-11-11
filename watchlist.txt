@@ -266,6 +266,8 @@ DVN
 FTI
 AEM
 AU
+AMC
+GME
 
 # ── 차트 예시로 추가 ──
 OII, Oceaneering International
