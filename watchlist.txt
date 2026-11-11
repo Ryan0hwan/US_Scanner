@@ -268,6 +268,10 @@ AEM
 AU
 AMC
 GME
+RACE
+STLA
+CPRI
+LVMUY
 
 # ── 차트 예시로 추가 ──
 OII, Oceaneering International
