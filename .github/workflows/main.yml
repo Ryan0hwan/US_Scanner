@@ -6,7 +6,7 @@ on:
     - cron: "10 22 * * 1-5"   # 한국 07:10 장 마감 후 확정
   workflow_dispatch:
     inputs:
-      run_all:     { description: "✅ 전부 실행 (체크하면 아래 선택과 상관없이 15개 모두)", type: boolean, default: false }
+      run_all:     { description: "✅ 전부 실행 (체크하면 아래 선택과 상관없이 16개 모두)", type: boolean, default: false }
       light:       { description: "신호등 (시장·ETF·그룹 RS)", type: boolean, default: false }
       ratio:       { description: "비교지표", type: boolean, default: false }
       etfvol:      { description: "ETF 거래량", type: boolean, default: false }
@@ -22,8 +22,9 @@ on:
       earnings:    { description: "실적 플레이", type: boolean, default: false }
       bottoms:     { description: "바닥 패턴 (역헤드앤숄더·쌍바닥)", type: boolean, default: false }
       wedge:       { description: "폴링 웻지", type: boolean, default: false }
+      base:        { description: "장기 베이스 (2년+ 컵앤핸들·박스)", type: boolean, default: false }
       force:       { description: "테스트 실행 (주말·장 시간과 상관없이 최근 거래일 기준)", type: boolean, default: true }
-      diagnose:    { description: "진단할 티커 (VCP·삼각형·델타·눌림목·아일랜드·실적·바닥패턴·웻지, 예: NVDA, AAPL)", type: string, default: "" }
+      diagnose:    { description: "진단할 티커 (VCP·삼각형·델타·눌림목·아일랜드·실적·바닥패턴·웻지·베이스, 예: NVDA, AAPL)", type: string, default: "" }
 
 permissions:
   contents: write        # RS 대시보드 결과(docs, rs/data)를 저장소에 저장
@@ -56,6 +57,7 @@ jobs:
           - { sys: earnings, script: earnings.py,     secret: US_WEBHOOK_EARNINGS, close_only: true  }
           - { sys: bottoms,  script: bottoms.py,      secret: US_WEBHOOK_BOTTOMS,  close_only: false }
           - { sys: wedge,    script: wedge.py,        secret: US_WEBHOOK_WEDGE,    close_only: false }
+          - { sys: base,     script: base.py,         secret: US_WEBHOOK_BASE,     close_only: true  }
     steps:
       # 실행 여부: 수동이면 체크한 시스템만 (전부 실행 체크 시 모두) / 23:50 장중 회차에는 '마감된 날'만 보는 델타·ETF 거래량은 건너뜀
       - name: Decide
@@ -86,7 +88,7 @@ jobs:
         run: cp watchlist.txt etfs.txt charts.py patternkit.py ${{ matrix.sys }}/
 
       # 차트(그림) 한글 글꼴
-      - if: steps.go.outputs.run == '1' && contains(fromJSON('["light","etfvol","delta","earnings","bottoms","wedge"]'), matrix.sys)
+      - if: steps.go.outputs.run == '1' && contains(fromJSON('["light","etfvol","delta","earnings","bottoms","wedge","base"]'), matrix.sys)
         run: (sudo apt-get update -qq && sudo apt-get install -y -qq fonts-nanum) > /dev/null || true
 
       # 시스템별 상태(재알림 방지, 종목 목록 캐시)를 다음 실행으로 넘김
@@ -104,7 +106,7 @@ jobs:
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets[matrix.secret] }}
           FORCE: ${{ github.event_name == 'workflow_dispatch' && inputs.force && '1' || '0' }}
-          DIAGNOSE: ${{ contains(fromJSON('["vcp","triangle","delta","pullback","island","earnings","bottoms","wedge"]'), matrix.sys) && inputs.diagnose || '' }}
+          DIAGNOSE: ${{ contains(fromJSON('["vcp","triangle","delta","pullback","island","earnings","bottoms","wedge","base"]'), matrix.sys) && inputs.diagnose || '' }}
           RS_DOCS: ${{ github.workspace }}/docs
 
       # RS 대시보드 페이지(docs/)와 순위 기록(rs/data)을 저장소에 저장 → GitHub Pages가 새 페이지 게시
