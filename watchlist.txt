@@ -272,6 +272,7 @@ RACE
 STLA
 CPRI
 LVMUY
+DCTH
 
 # ── 차트 예시로 추가 ──
 OII, Oceaneering International
