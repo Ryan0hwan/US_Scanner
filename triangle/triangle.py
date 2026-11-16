@@ -1,6 +1,6 @@
 """
 상승 삼각형 / 상승 수렴 스캐너 (추세선 방식)
-- S&P 500 + 내 관심종목에서
+- S&P 500 + 내 관심종목 + ETF(etfs.txt)에서
 - 고점들을 잇는 위쪽 추세선(수평 또는 완만한 상승)과, 저점들을 잇는 더 가파른 아래쪽 추세선이
   위로 수렴하는 패턴을 일봉·주봉에서 찾고
 - 주가가 위쪽 선 근처(돌파 직전 또는 막 돌파)에 있는 종목을 디스코드로 보냅니다.
@@ -21,7 +21,7 @@ import pandas as pd
 import requests
 
 # ───────────── 설정 (여기만 고치면 됩니다) ─────────────
-GROUPS = os.environ.get("SCAN_GROUPS", "sp500,watchlist").split(",")
+GROUPS = os.environ.get("SCAN_GROUPS", "sp500,watchlist,etf").split(",")
 
 # 시간 단위별 설정: 패턴 길이 후보(봉 수), 고점·저점 판별 폭, 추세선 터치 허용 오차(%)
 TIMEFRAMES = {
@@ -53,7 +53,7 @@ NY = ZoneInfo("America/New_York")
 STATE = Path(__file__).parent / "state"
 STATE.mkdir(exist_ok=True)
 UA = {"User-Agent": "Mozilla/5.0 (triangle-scanner)"}
-GROUP_LABEL = {"sp500": "S&P 500", "watchlist": "Watchlist"}
+GROUP_LABEL = {"sp500": "S&P 500", "watchlist": "Watchlist", "etf": "ETF"}
 
 
 # ───────────── 종목 목록 ─────────────
@@ -64,8 +64,8 @@ def _fetch_sp500() -> pd.DataFrame:
     return pd.DataFrame({"ticker": t["Symbol"], "name": t["Security"], "industry": t["GICS Sub-Industry"]})
 
 
-def _load_watchlist() -> pd.DataFrame:
-    p = Path(__file__).parent / "watchlist.txt"
+def _load_watchlist(fname: str = "watchlist.txt", label: str = "Watchlist") -> pd.DataFrame:
+    p = Path(__file__).parent / fname
     rows = []
     if p.exists():
         for ln in p.read_text(encoding="utf-8").splitlines():
@@ -74,13 +74,15 @@ def _load_watchlist() -> pd.DataFrame:
                 continue
             tk, _, name = ln.partition(",")
             tk = re.sub(r"\.([A-Z])$", r"-\1", tk.strip().upper())  # MOG.A → MOG-A
-            rows.append({"ticker": tk, "name": name.strip(), "industry": "Watchlist"})
+            rows.append({"ticker": tk, "name": name.strip(), "industry": label})
     return pd.DataFrame(rows, columns=["ticker", "name", "industry"]).drop_duplicates("ticker")
 
 
 def load_universe(group: str) -> pd.DataFrame:
     if group == "watchlist":
         return _load_watchlist()
+    if group == "etf":                                   # ETF 목록 (etfs.txt)
+        return _load_watchlist("etfs.txt", "ETF")
     cache = STATE / f"universe_{group}.csv"
     fresh = cache.exists() and (time.time() - cache.stat().st_mtime) < 7 * 86400
     if not fresh:
@@ -360,7 +362,11 @@ def main():
             found.append({"ticker": ticker, **r})
 
     # RS 백분위 (진단 모드에서는 비교 대상이 적어 참고용)
-    rs = (pd.Series(scores).rank(pct=True) * 98 + 1).round().fillna(0).astype(int)
+    # ETF(레버리지·인버스 포함)는 순위를 부풀리지 않게 개별 종목끼리만 순위를 매기고, ETF는 그 분포에 대어 점수를 줌
+    sc = pd.Series(scores, dtype=float).dropna()
+    base = np.sort(sc[[group_of.get(t) != "etf" for t in sc.index]].to_numpy())
+    rs = pd.Series({t: (np.searchsorted(base, v, side="right") / len(base) * 98 + 1) if len(base) else 0
+                    for t, v in sc.items()}).round().astype(int)
     for f in found:
         f["rs"] = int(rs.get(f["ticker"], 0))
         m = meta.get(f["ticker"])
