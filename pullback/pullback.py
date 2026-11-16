@@ -1,6 +1,6 @@
 """
 강세주 눌림목 스캐너 v2 — 마틴 룩(Martin Luk) 방식 (일봉)
-S&P 500 + 관심종목(watchlist.txt)
+S&P 500 + 관심종목(watchlist.txt) + ETF(etfs.txt)
 
 1) 시장 내부 강도: 전 종목을 EMA 배열로 Lead / Mediocre / Lag 분류, 어제와 비교
      Lead     = 9 EMA > 21 EMA > 50 EMA
@@ -35,6 +35,7 @@ import requests
 MIN_AVG_VOL = float(os.environ.get("MIN_AVG_VOL", "500000"))          # 10일 평균 거래량(주)
 MIN_DOLLAR_VOL = float(os.environ.get("MIN_DOLLAR_VOL", "50000000"))  # 20일 평균 거래대금($) — Price × Volume
 ADR_MIN = float(os.environ.get("ADR_MIN", "2.5"))                     # 20일 평균 일중 변동폭(%) — 원래 주간 변동성 3.5%, 대형주 위주라 완화
+ETF_ADR_MIN = float(os.environ.get("ETF_ADR_MIN", "1.5"))              # ETF는 변동폭이 작아 기준을 낮춤 (지수·섹터 ETF ADR 보통 1~2%)
 # Leader (강세주)
 LEADER_PCT = float(os.environ.get("LEADER_PCT", "70"))                # 1개월 또는 3개월 수익률 백분위가 이 이상
 # 눌림목
@@ -77,24 +78,24 @@ def _sp500() -> pd.DataFrame:
     return pd.read_csv(cache).fillna("") if cache.exists() else pd.DataFrame(columns=["ticker", "name", "industry"])
 
 
-def _watchlist() -> pd.DataFrame:
+def _watchlist(fname: str = "watchlist.txt", industry: str = "") -> pd.DataFrame:
     rows = []
-    p = ROOT / "watchlist.txt"
+    p = ROOT / fname
     if p.exists():
         for ln in p.read_text(encoding="utf-8").splitlines():
             ln = ln.split("#")[0].strip()
             if ln:
                 tk, _, nm = ln.partition(",")
-                rows.append({"ticker": re.sub(r"\.([A-Z])$", r"-\1", tk.strip().upper()), "name": nm.strip(), "industry": ""})
+                rows.append({"ticker": re.sub(r"\.([A-Z])$", r"-\1", tk.strip().upper()), "name": nm.strip(), "industry": industry})
     return pd.DataFrame(rows, columns=["ticker", "name", "industry"])
 
 
 def load_all() -> dict[str, dict]:
     out = {}
-    for df in (_sp500(), _watchlist()):
+    for kind, df in (("etf", _watchlist("etfs.txt", "ETF")), ("stock", _sp500()), ("stock", _watchlist())):
         for r in df.itertuples():
             if r.ticker not in out:
-                out[r.ticker] = {"name": r.name, "industry": r.industry or "관심종목"}
+                out[r.ticker] = {"name": r.name, "industry": r.industry or "관심종목", "kind": kind}
             elif not out[r.ticker]["name"]:
                 out[r.ticker]["name"] = r.name
     return out
@@ -320,7 +321,13 @@ def main():
     # 1·3개월 수익률 백분위 (Leader 판정)
     r1 = pd.Series({t: df["Close"].iloc[-1] / df["Close"].iloc[-22] - 1 for t, df in data.items()})
     r3 = pd.Series({t: df["Close"].iloc[-1] / df["Close"].iloc[-64] - 1 for t, df in data.items()})
-    p1, p3 = r1.rank(pct=True) * 100, r3.rank(pct=True) * 100
+    # 백분위는 개별 종목끼리만 매기고, ETF(레버리지·인버스 포함)는 그 분포에 대어 점수를 줌 → ETF가 순위를 부풀리지 않음
+    is_etf = {t: info.get(t, {}).get("kind") == "etf" for t in data}
+
+    def pct(r: pd.Series) -> pd.Series:
+        base = np.sort(r[[not is_etf[t] for t in r.index]].to_numpy())
+        return pd.Series({t: np.searchsorted(base, v, side="right") / max(len(base), 1) * 100 for t, v in r.items()})
+    p1, p3 = pct(r1), pct(r3)
 
     # 1) Lead / Mediocre / Lag
     cls_now = {t: classify(df.iloc[-1]) for t, df in data.items()}
@@ -345,8 +352,9 @@ def main():
             why[t] = f"거래량·거래대금 미달 (10일 평균 {last['vol10']/1e3:,.0f}K주, 20일 평균 ${last['dvol']/1e6:,.0f}M)"
             funnel["① 거래대금 미달"] += 1
             continue
-        if last["adr"] < ADR_MIN:
-            why[t] = f"변동성 부족 (ADR {last['adr']:.1f}% < {ADR_MIN:g}%)"
+        adr_min = ETF_ADR_MIN if is_etf.get(t) else ADR_MIN
+        if last["adr"] < adr_min:
+            why[t] = f"변동성 부족 (ADR {last['adr']:.1f}% < {adr_min:g}%)"
             funnel["② 변동성 부족"] += 1
             continue
         # ⚡ Potent (오늘 강하게 움직인 새 강세 후보)
@@ -402,13 +410,14 @@ def main():
         post("**눌림목 스캐너 진단**\n" + "\n".join(lines))
         return
 
-    # ── 1) 시장 내부 강도
-    cnt = Counter(cls_now.values())
+    # ── 1) 시장 내부 강도 (개별 종목만. ETF는 빼고 셈)
+    stk = {t: c for t, c in cls_now.items() if not is_etf.get(t)}
+    cnt = Counter(stk.values())
     total = sum(cnt.values())
-    moved = Counter((prev[t], c) for t, c in cls_now.items() if t in prev and prev[t] != c)
+    moved = Counter((prev[t], c) for t, c in stk.items() if t in prev and prev[t] != c)
     trend = ""
     if prev:
-        pc = Counter(v for k, v in prev.items() if k in cls_now)
+        pc = Counter(v for k, v in prev.items() if k in stk)
         trend = f" (어제 Lead {pc['Lead']})"
     post(f"**🪜 강세주 눌림목 · 마틴 룩 방식 | {session} 마감**\n"
          f"시장 내부 강도: 🟢 Lead {cnt['Lead']} ({cnt['Lead']/total*100:.0f}%){trend} · 🟡 Mediocre {cnt['Mediocre']} · "
@@ -423,7 +432,7 @@ def main():
         for t in new_lead:
             by_ind[info.get(t, {}).get("industry", "관심종목")].append(t)
         items = sorted(by_ind.items(), key=lambda kv: -len(kv[1]))
-        lines = [("🔥 " if len(v) >= 2 and k != "관심종목" else "   ") + fit(k[:26], 27) + " " + ", ".join(sorted(v)) for k, v in items]
+        lines = [("🔥 " if len(v) >= 2 and k not in ("관심종목", "ETF") else "   ") + fit(k[:26], 27) + " " + ", ".join(sorted(v)) for k, v in items]
         send_lines(f"🆕 오늘 새로 Lead 진입 {len(new_lead)}종목 · 🔥 = 같은 업종에서 2종목 이상 (자금 유입 신호)", "업종 / 종목", lines)
 
     # ── 3) 눌림목
