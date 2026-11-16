@@ -1,8 +1,8 @@
 """
 MA 터치 스캐너
-- S&P 500 / Nasdaq 100 / Russell 2000(대형·고유동성만) / 내 관심종목을 훑어서
-- 당일 가격 범위가 50일 SMA, 100일 VWMA, 200일 SMA에 닿은 종목을
-- (별도 섹션) 많이 하락한 종목이 일봉 SMA325·주봉 VWMA100·월봉 VWMA100 장기 지지선에 닿은 경우
+- S&P 500 / Nasdaq 100 / Russell 2000(대형·고유동성만) / 내 관심종목 / ETF(etfs.txt)를 훑어서
+- 당일 가격 범위가 50일 EMA, 100일 VWMA, 200일 EMA에 닿은 종목을
+- (별도 섹션) 많이 하락한 종목이 일봉 EMA325·주봉 VWMA100·월봉 VWMA100 장기 지지선에 닿은 경우
 - 디스코드 채널로 표 형태로 보냅니다.
 """
 import datetime as dt
@@ -20,10 +20,10 @@ import pandas as pd
 import requests
 
 # ───────────── 설정 (여기만 고치면 됩니다) ─────────────
-GROUPS = os.environ.get("SCAN_GROUPS", "sp500,watchlist").split(",")  # 앞 그룹 우선 (겹치는 종목은 앞 그룹에만 표시)
+GROUPS = os.environ.get("SCAN_GROUPS", "sp500,watchlist,etf").split(",")  # 앞 그룹 우선 (겹치는 종목은 앞 그룹에만 표시)
 TOL_PCT = float(os.environ.get("TOL_PCT", "0.8"))      # 터치 허용 오차(%). 선의 ±0.8% 안에 들어오면 터치로 봄
 ONLY_FROM_ABOVE = os.environ.get("ONLY_FROM_ABOVE", "0") == "1"  # 1이면 전일 종가가 선 위에 있던 종목만 (눌림목). 0이면 양방향 모두
-REQUIRE_GOLDEN = os.environ.get("REQUIRE_GOLDEN", "1") == "1"   # 1이면 정배열(50일 SMA > 200일 SMA) 종목만 알림
+REQUIRE_GOLDEN = os.environ.get("REQUIRE_GOLDEN", "1") == "1"   # 1이면 정배열(50일 EMA > 200일 EMA) 종목만 알림
 REQUIRE_CLOSE_ABOVE = os.environ.get("REQUIRE_CLOSE_ABOVE", "1") == "1"  # 1이면 종가가 터치한 선 위에서 마감한 경우만
 FIRST_TOUCH_DAYS = int(os.environ.get("FIRST_TOUCH_DAYS", "20"))  # 위에서 내려온 터치는 최근 N일간 종가가 그 선 아래로 간 적 없어야 함 (0이면 해제)
 REQUIRE_SLOPE = os.environ.get("REQUIRE_SLOPE", "1") == "1"      # 1이면 50일선(20일 전 대비)·200일선(1개월 전 대비)이 모두 상승 중인 종목만
@@ -47,7 +47,7 @@ LT_DRAWDOWN = float(os.environ.get("LT_DRAWDOWN", "25"))           # 52주 고�
 LT_ONLY_LAST_RUN = os.environ.get("LT_ONLY_LAST_RUN", "1") == "1"  # 장 마감 무렵 회차(뉴욕 15:30 이후)에서만 판정
 # 선 이름: (봉, 종류, 기간, 터치 허용오차%, 기울기 비교 봉수, 첫 터치 확인 봉수)
 LT_LINES = {
-    "D-SMA325":  ("1d", "sma", 325, float(os.environ.get("LT_TOL_D", "1")), 21, 126),   # 1개월 전보다 상승, 6개월 첫 터치
+    "D-EMA325":  ("1d", "ema", 325, float(os.environ.get("LT_TOL_D", "1")), 21, 126),   # 1개월 전보다 상승, 6개월 첫 터치
     "W-VWMA100": ("1wk", "vwma", 100, float(os.environ.get("LT_TOL_W", "2")), 13, 26),  # 13주 전보다 상승, 6개월 첫 터치
     "M-VWMA100": ("1mo", "vwma", 100, float(os.environ.get("LT_TOL_M", "3")), 6, 12),   # 6개월 전보다 상승, 12개월 첫 터치
 }
@@ -56,7 +56,7 @@ CROSS_ENABLE = os.environ.get("CROSS_ENABLE", "1") == "1"
 CROSS_DAYS = int(os.environ.get("CROSS_DAYS", "2"))                 # 최근 N거래일 안에 돌파 (오늘 포함)
 CROSS_MAX_ABOVE = float(os.environ.get("CROSS_MAX_ABOVE", "3"))     # 지금 종가가 선 위 이 % 이내만 (너무 멀리 간 종목 제외)
 CROSS_BELOW_DAYS = int(os.environ.get("CROSS_BELOW_DAYS", "3"))     # 돌파 직전 이 일수 이상 선 아래에 있었어야 함 (선 위아래로 왔다 갔다 하는 종목 제외)
-CROSS_LINES = ["100D VWMA", "50D SMA"]
+CROSS_LINES = ["100D VWMA", "50D EMA"]
 WEBHOOK = os.environ.get("DISCORD_WEBHOOK_URL", "")
 FORCE = os.environ.get("FORCE", "0") == "1"            # 장 시간이 아니어도 강제 실행
 # ──────────────────────────────────────────────────────
@@ -65,8 +65,8 @@ NY = ZoneInfo("America/New_York")
 STATE = Path(__file__).parent / "state"
 STATE.mkdir(exist_ok=True)
 UA = {"User-Agent": "Mozilla/5.0 (ma-touch-scanner)"}
-GROUP_LABEL = {"sp500": "S&P 500", "nasdaq100": "Nasdaq 100", "russell2000": "Russell 2000", "watchlist": "Watchlist"}
-MA_NAMES = ["50D SMA", "100D VWMA", "200D SMA"]
+GROUP_LABEL = {"sp500": "S&P 500", "nasdaq100": "Nasdaq 100", "russell2000": "Russell 2000", "watchlist": "Watchlist", "etf": "ETF"}
+MA_NAMES = ["50D EMA", "100D VWMA", "200D EMA"]
 BROWSER_UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                             "(KHTML, like Gecko) Chrome/126.0 Safari/537.36"}
 
@@ -107,8 +107,8 @@ def _fetch_russell2000() -> pd.DataFrame:
     return pd.DataFrame({"ticker": t["Ticker"], "name": t["Name"], "industry": t["Sector"]})
 
 
-def _load_watchlist() -> pd.DataFrame:
-    p = Path(__file__).parent / "watchlist.txt"
+def _load_watchlist(fname: str = "watchlist.txt", label: str = "Watchlist") -> pd.DataFrame:
+    p = Path(__file__).parent / fname
     rows = []
     if p.exists():
         for ln in p.read_text(encoding="utf-8").splitlines():
@@ -117,13 +117,15 @@ def _load_watchlist() -> pd.DataFrame:
                 continue
             tk, _, name = ln.partition(",")          # "티커, 회사명" 형식 (회사명은 생략 가능)
             tk = re.sub(r"\.([A-Z])$", r"-\1", tk.strip().upper())  # MOG.A → MOG-A (야후 표기)
-            rows.append({"ticker": tk, "name": name.strip(), "industry": "Watchlist"})
+            rows.append({"ticker": tk, "name": name.strip(), "industry": label})
     return pd.DataFrame(rows, columns=["ticker", "name", "industry"]).drop_duplicates("ticker")
 
 
 def load_universe(group: str) -> pd.DataFrame:
     if group == "watchlist":
         return _load_watchlist()
+    if group == "etf":                                   # ETF 목록 (etfs.txt)
+        return _load_watchlist("etfs.txt", "ETF")
     cache = STATE / f"universe_{group}.csv"
     fresh = cache.exists() and (time.time() - cache.stat().st_mtime) < 7 * 86400
     if not fresh:
@@ -170,7 +172,7 @@ def high_prob(df: pd.DataFrame, frac: float) -> dict:
     if len(df) < max(252, HP_PIVOT_LOOKBACK + HP_RALLY_DAYS + 2):
         return res
     # ③ 강화된 정배열 50 > 150 > 200
-    s50, s150, s200 = (c.rolling(n).mean().iloc[-1] for n in (50, 150, 200))
+    s50, s150, s200 = (c.ewm(span=n, adjust=False, min_periods=n).mean().iloc[-1] for n in (50, 150, 200))
     align = s50 > s150 > s200
 
     # ① 거래량 감소: 오늘(장중이면 하루치로 환산) < 50일 평균 × 0.8, 눌림 평균 < 직전 상승 구간 평균
@@ -207,15 +209,15 @@ def check_touches(df: pd.DataFrame, today: dt.date | None, spy_ret: dict | None 
     if last["Close"] < MIN_PRICE or (c * v).tail(50).mean() < max(MIN_DOLLAR_VOL, min_dollar_vol):
         return []
     series = {
-        "50D SMA": c.rolling(50).mean(),
+        "50D EMA": c.ewm(span=50, adjust=False, min_periods=50).mean(),
         "100D VWMA": (c * v).rolling(100).sum() / v.rolling(100).sum(),
-        "200D SMA": c.rolling(200).mean(),
+        "200D EMA": c.ewm(span=200, adjust=False, min_periods=200).mean(),
     }
     mas = {k: s.iloc[-1] for k, s in series.items()}
-    s50, s200 = series["50D SMA"], series["200D SMA"]
+    s50, s200 = series["50D EMA"], series["200D EMA"]
 
     # 정배열: 50일선 > 200일선 (200일선이 없으면 제외)
-    if REQUIRE_GOLDEN and (pd.isna(mas["50D SMA"]) or pd.isna(mas["200D SMA"]) or not mas["50D SMA"] > mas["200D SMA"]):
+    if REQUIRE_GOLDEN and (pd.isna(mas["50D EMA"]) or pd.isna(mas["200D EMA"]) or not mas["50D EMA"] > mas["200D EMA"]):
         return []
 
     # 이평선 기울기: 50일선은 20거래일 전보다, 200일선은 21거래일(약 1개월) 전보다 높아야 함
@@ -315,8 +317,8 @@ def check_cross(df: pd.DataFrame, today: dt.date | None, min_dollar_vol: float =
     c, v = df["Close"], df["Volume"]
     if c.iloc[-1] < MIN_PRICE or (c * v).tail(50).mean() < max(MIN_DOLLAR_VOL, min_dollar_vol):
         return []
-    series = {"50D SMA": c.rolling(50).mean(), "100D VWMA": (c * v).rolling(100).sum() / v.rolling(100).sum()}
-    s200 = c.rolling(200).mean()
+    series = {"50D EMA": c.ewm(span=50, adjust=False, min_periods=50).mean(), "100D VWMA": (c * v).rolling(100).sum() / v.rolling(100).sum()}
+    s200 = c.ewm(span=200, adjust=False, min_periods=200).mean()
     vavg = v.iloc[-51:-1].mean()
     out = []
     for name in CROSS_LINES:
@@ -333,7 +335,7 @@ def check_cross(df: pd.DataFrame, today: dt.date | None, min_dollar_vol: float =
                 out.append({"line": name, "ma": float(ma.iloc[-1]), "last": float(c.iloc[-1]), "dist": float(dist),
                             "when": "오늘" if k == 1 else "어제" if k == 2 else f"{k - 1}일전",
                             "vol": float(v.iloc[i] / vavg) if vavg > 0 else float("nan"),
-                            "golden": bool(not pd.isna(s200.iloc[-1]) and series["50D SMA"].iloc[-1] > s200.iloc[-1])})
+                            "golden": bool(not pd.isna(s200.iloc[-1]) and series["50D EMA"].iloc[-1] > s200.iloc[-1])})
                 break
     return out
 
@@ -453,7 +455,7 @@ def lt_check(daily: pd.DataFrame, bars: dict[str, pd.DataFrame]) -> list[dict]:
         if b is None or len(b) < n + max(slope_n, first_n) + 1:
             continue                                                      # 데이터 부족 (상장 기간이 짧음)
         c, v = b["Close"], b["Volume"]
-        line = c.rolling(n).mean() if kind == "sma" else (c * v).rolling(n).sum() / v.rolling(n).sum()
+        line = c.ewm(span=n, adjust=False, min_periods=n).mean() if kind == "ema" else (c * v).rolling(n).sum() / v.rolling(n).sum()
         ma = float(line.iloc[-1])
         if np.isnan(ma):
             continue
@@ -472,7 +474,7 @@ def lt_check(daily: pd.DataFrame, bars: dict[str, pd.DataFrame]) -> list[dict]:
     return out
 
 
-LT_TITLE = {"D-SMA325": "일봉 SMA325", "W-VWMA100": "주봉 VWMA100", "M-VWMA100": "월봉 VWMA100"}
+LT_TITLE = {"D-EMA325": "일봉 EMA325", "W-VWMA100": "주봉 VWMA100", "M-VWMA100": "월봉 VWMA100"}
 
 
 def send_lt_table(title: str, rows: list[dict]):
@@ -525,7 +527,7 @@ def main():
                 meta[row.ticker] = row
                 group_of[row.ticker] = g
     print(f"스캔 대상 {len(meta)}종목 " + ", ".join(f"{g}={len(u)}" for g, u in universes.items()))
-    failed = [GROUP_LABEL.get(g, g) for g, u in universes.items() if g != "watchlist" and len(u) == 0]
+    failed = [GROUP_LABEL.get(g, g) for g, u in universes.items() if g not in ("watchlist", "etf") and len(u) == 0]
     if failed and meta:
         post(f"⚠️ MA 스캐너: {', '.join(failed)} 종목 목록을 불러오지 못해 이번 실행에서 빠졌습니다.")
     if not meta:
@@ -621,7 +623,7 @@ def main():
                 sent.add(key)
                 lt_rows.append({"ticker": t, "name": str(meta[t].name) or company_name(t), **r})
     if lt_rows:
-        for line_name in LT_LINES:                       # 일봉 SMA325 / 주봉 VWMA100 / 월봉 VWMA100 각각 따로
+        for line_name in LT_LINES:                       # 일봉 EMA325 / 주봉 VWMA100 / 월봉 VWMA100 각각 따로
             rows = sorted([r for r in lt_rows if r["line"] == line_name], key=lambda r: r["from_hi"])
             if rows:
                 send_lt_table(f"📉 {LT_TITLE[line_name]} 터치 {now:%b} {now.day} | 고점 대비 -{LT_DRAWDOWN:.0f}% 이상 하락 ({len(rows)})", rows)
