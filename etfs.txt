@@ -182,6 +182,7 @@ JAAA, AAA 대출채권(CLO)
 
 # ── 숏·인버스 (11/17 추가) ──
 IREZ, IREN 2배 숏
+PLTZ, PLTR 2배 숏
 NBIZ, NBIS 2배 숏
 SMST, MSTR 2배 숏
 MSTZ, MSTR 2배 숏
