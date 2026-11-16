@@ -163,5 +163,46 @@ NLR, 우라늄·원자력 (목록의 NRL → NLR로 추정)
 TAN, 태양광
 PBW, 청정에너지 (와일더힐)
 
+# ── 추가 (11/17) ──
+ADBG, ADBE 2배 롱 (레버리지)
+APPX, APP 2배 롱 (레버리지)
+DRN, 리츠 3배 롱 (레버리지)
+BTAL, 안티베타 (저베타 롱·고베타 숏 헤지)
+SPHD, 고배당 저변동성 (S&P 500)
+NOBL, 배당 귀족 (25년+ 배당 증가)
+SPLV, 저변동성 (S&P 500)
+INDA, 인도
+SPYD, 고배당 (S&P 500)
+HDV, 고배당 (아이셰어즈 코어)
+UUP, 달러 인덱스
+FLTR, 변동금리 회사채
+PULS, 초단기 채권
+BSCQ, 회사채 2026 만기
+JAAA, AAA 대출채권(CLO)
+
+# ── 숏·인버스 (11/17 추가) ──
+IREZ, IREN 2배 숏
+NBIZ, NBIS 2배 숏
+SMST, MSTR 2배 숏
+MSTZ, MSTR 2배 숏
+BTCZ, 비트코인 2배 숏
+BMNZ, BMNR 2배 숏
+SBIT, 비트코인 2배 숏
+BITI, 비트코인 1배 숏
+CRCD, CRCL 2배 숏
+SMCZ, SMCI 2배 숏
+NVD, NVDA 2배 숏
+NVDQ, NVDA 2배 숏
+AMZD, AMZN 1배 숏
+MSFD, MSFT 1배 숏
+SSG, 반도체 2배 숏
+LABD, 바이오 3배 숏
+GDXD, 금광주 3배 숏
+ZSL, 은 2배 숏
+SCO, 원유 2배 숏
+KOLD, 천연가스 2배 숏
+SRTY, 러셀2000 3배 숏
+RWM, 러셀2000 1배 숏
+
 # ── 확인 필요 (정확한 티커를 알려주면 주석을 풀어 추가) ──
-ISAG, 농사
+# ISAG
