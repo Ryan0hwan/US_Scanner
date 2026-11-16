@@ -1,6 +1,6 @@
 """
 볼린저밴드 과매도 반등 스캐너
-- S&P 500 + 내 관심종목에서
+- S&P 500 + 내 관심종목 + ETF(etfs.txt)에서
 - 상승 추세 종목이 볼린저밴드 하단을 과하게 이탈한 뒤 반등을 확인한 순간을 찾아
 - 목표가(중심선)·손절가(이탈 저가)·손익비와 함께 디스코드로 보냅니다.
 """
@@ -19,7 +19,7 @@ import pandas as pd
 import requests
 
 # ───────────── 설정 (여기만 고치면 됩니다) ─────────────
-GROUPS = os.environ.get("SCAN_GROUPS", "sp500,watchlist").split(",")  # 앞 그룹 우선
+GROUPS = os.environ.get("SCAN_GROUPS", "sp500,watchlist,etf").split(",")  # 앞 그룹 우선
 
 BB_LEN = int(os.environ.get("BB_LEN", "20"))                    # 볼린저밴드 기간
 BB_STD = float(os.environ.get("BB_STD", "2.0"))                 # 볼린저밴드 표준편차 배수
@@ -49,7 +49,7 @@ NY = ZoneInfo("America/New_York")
 STATE = Path(__file__).parent / "state"
 STATE.mkdir(exist_ok=True)
 UA = {"User-Agent": "Mozilla/5.0 (bb-scanner)"}
-GROUP_LABEL = {"sp500": "S&P 500", "watchlist": "Watchlist"}
+GROUP_LABEL = {"sp500": "S&P 500", "watchlist": "Watchlist", "etf": "ETF"}
 
 
 # ───────────── 종목 목록 ─────────────
@@ -60,8 +60,8 @@ def _fetch_sp500() -> pd.DataFrame:
     return pd.DataFrame({"ticker": t["Symbol"], "name": t["Security"], "industry": t["GICS Sub-Industry"]})
 
 
-def _load_watchlist() -> pd.DataFrame:
-    p = Path(__file__).parent / "watchlist.txt"
+def _load_watchlist(fname: str = "watchlist.txt", label: str = "Watchlist") -> pd.DataFrame:
+    p = Path(__file__).parent / fname
     rows = []
     if p.exists():
         for ln in p.read_text(encoding="utf-8").splitlines():
@@ -70,13 +70,15 @@ def _load_watchlist() -> pd.DataFrame:
                 continue
             tk, _, name = ln.partition(",")
             tk = re.sub(r"\.([A-Z])$", r"-\1", tk.strip().upper())  # MOG.A → MOG-A
-            rows.append({"ticker": tk, "name": name.strip(), "industry": "Watchlist"})
+            rows.append({"ticker": tk, "name": name.strip(), "industry": label})
     return pd.DataFrame(rows, columns=["ticker", "name", "industry"]).drop_duplicates("ticker")
 
 
 def load_universe(group: str) -> pd.DataFrame:
     if group == "watchlist":
         return _load_watchlist()
+    if group == "etf":                                   # ETF 목록 (etfs.txt)
+        return _load_watchlist("etfs.txt", "ETF")
     cache = STATE / f"universe_{group}.csv"
     fresh = cache.exists() and (time.time() - cache.stat().st_mtime) < 7 * 86400
     if not fresh:
