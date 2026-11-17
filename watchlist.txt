@@ -275,6 +275,10 @@ LVMUY
 DCTH
 CCSI
 DCTH
+CYPH
+FWDI
+NIO
+FPS
 
 # ── 차트 예시로 추가 ──
 OII, Oceaneering International
