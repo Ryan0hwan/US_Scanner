@@ -280,6 +280,7 @@ FWDI
 NIO
 FPS
 SLS
+WEN
 
 # ── 차트 예시로 추가 ──
 OII, Oceaneering International
