@@ -204,6 +204,34 @@ SCO, 원유 2배 숏
 KOLD, 천연가스 2배 숏
 SRTY, 러셀2000 3배 숏
 RWM, 러셀2000 1배 숏
+DXD, 다우30 2배 숏
+SDOW, 다우30 3배 숏
+DOG, 다우30 1배 숏
+SDS, S&P500 2배 숏
+SPXS, S&P500 3배 숏
+SH, S&P500 1배 숏
+SPDN, S&P500 1배 숏 (저보수)
+QID, 나스닥100 2배 숏
+SNDQ, 나스닥100 숏 (추정)
+TWM, 러셀2000 2배 숏
+FAZ, 금융 3배 숏
+PLTD, PLTR 1배 숏
+SPCU, 스페이스X(SPCX) 숏
+SPAX, 스페이스X(SPCX) 숏
+SPCF, 스페이스X(SPCX) 숏
+SPCM, 스페이스X(SPCX) 숏
+SPAL, 스페이스X(SPCX) 숏
+SPCH, 스페이스X(SPCX) 숏
+CBRX, 단일종목 숏 (대상 확인 필요)
+LOFF, 단일종목 숏 (대상 확인 필요)
+AVL, 단일종목 숏 (대상 확인 필요)
+BEZ, 단일종목 숏 (대상 확인 필요)
+
+# ── 변동성(VIX) 롱 · 하락장·급락 때 오름 (11/18 추가) ──
+VXX, VIX 단기선물 1배
+VIXY, VIX 단기선물 1배
+UVXY, VIX 단기선물 1.5배
+UVIX, VIX 단기선물 2배
 
 # ── 확인 필요 (정확한 티커를 알려주면 주석을 풀어 추가) ──
 # ISAG
