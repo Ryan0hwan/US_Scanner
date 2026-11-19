@@ -31,7 +31,8 @@ MIN_DECLINE = 8.0          # 웻지 기간 위쪽 선 하락폭 최소 %
 SQUEEZE = 0.65             # 지금 두 선 간격 ÷ 시작 간격 최대 (수렴)
 MAX_BREAK_BELOW = 0.05     # 아래쪽 선을 2% 넘게 깨고 마감한 봉 비율 상한
 BREAKOUT_BARS = 5          # 돌파로 볼 최근 봉 수
-BO_VOL_MIN = 1.5           # 돌파일 거래량 ÷ 50일 평균 최소 (거래량 실린 돌파만)
+BO_VOL_MIN = 1.3           # 돌파일 거래량 ÷ 50일 평균 최소 (거래량 실린 돌파만)
+BO_VOL_STRONG = 1.5        # 이 배수 이상은 '강한 돌파' 표로 따로 표시
 BO_CLOSE_POS = 0.5         # 돌파일 종가가 그날 고가~저가 중 위쪽 이 비율 이상 (윗꼬리만 긴 가짜 돌파 제외)
 NEAR_PCT = 3.0             # 위쪽 선 아래 이 % 이내 = 돌파 임박
 MAX_ABOVE = 10.0           # 돌파 후 선 위 이 % 넘게 간 종목은 제외
@@ -342,7 +343,9 @@ def main():
     new = [f for f in new if f["stage"] == "돌파" or (f["stage"] == "임박" and SHOW_NEAR)
            or (f["stage"] == "형성" and SHOW_FORMING)]
     cnt = lambda s: sum(1 for f in new if f["stage"] == s)
-    K.post(f"**📐 폴링 웻지 돌파 (거래량 {BO_VOL_MIN:g}배 이상) | {session}**\n🚀 돌파 {cnt('돌파')}"
+    strong = sum(1 for f in new if f["stage"] == "돌파" and f["vol"] >= BO_VOL_STRONG)
+    K.post(f"**📐 폴링 웻지 돌파 (거래량 {BO_VOL_MIN:g}배 이상) | {session}**\n🚀 돌파 {cnt('돌파')} "
+           f"(🔥 {BO_VOL_STRONG:g}배↑ {strong} · {BO_VOL_MIN:g}~{BO_VOL_STRONG:g}배 {cnt('돌파') - strong})"
            + (f" · 🎯 돌파 임박 {cnt('임박')}" if SHOW_NEAR else "")
            + (f" · 🔨 형성 중 {cnt('형성')}" if SHOW_FORMING else "")
            + (f" · 🌊 소파동 {len(new_s)}" if SMALL_ON else "") +
@@ -351,10 +354,17 @@ def main():
         K.post(f"📐 중파동: 오늘 새로 거래량 실린 돌파(평소 {BO_VOL_MIN:g}배 이상)가 나온 폴링 웻지 없음")
     for st in ["돌파"] + (["임박"] if SHOW_NEAR else []) + (["형성"] if SHOW_FORMING else []):
         rows = sorted([f for f in new if f["stage"] == st], key=lambda r: (-(r["touch"][0] + r["touch"][1]), r["sqz"]))
-        if rows:
+        if rows and st == "돌파":                       # 거래량 강도별로 표 나누기
+            hi = [r for r in rows if r["vol"] >= BO_VOL_STRONG]
+            lo = [r for r in rows if r["vol"] < BO_VOL_STRONG]
+            if hi:
+                table(f"폴링 웻지 · 🚀 돌파 · 🔥 거래량 {BO_VOL_STRONG:g}배 이상", hi)
+            if lo:
+                table(f"폴링 웻지 · 🚀 돌파 · 거래량 {BO_VOL_MIN:g}~{BO_VOL_STRONG:g}배", lo)
+        elif rows:
             table(f"폴링 웻지 · {STAGE[st]}", rows)
     pics = sorted([f for f in new if f["stage"] in ("돌파", "임박")],
-                  key=lambda r: (r["stage"] != "돌파", -(r["touch"][0] + r["touch"][1])))[:IMG_MAX]
+                  key=lambda r: (r["stage"] != "돌파", r["vol"] < BO_VOL_STRONG, -(r["touch"][0] + r["touch"][1])))[:IMG_MAX]
     for f in pics:
         try:
             picture(f["t"], f["name"], data[f["t"]], f)
